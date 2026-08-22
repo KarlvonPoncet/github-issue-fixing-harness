@@ -27,6 +27,7 @@ export class Workspace {
   readonly root: string;
   private readonly allowedCommands: Set<string>;
   private readonly allowedPaths: string[];
+  private readonly commandInputPaths: string[];
   private readonly forbiddenPaths: string[];
   private readonly maxOutputChars: number;
   private readonly maxPatchBytes: number;
@@ -35,6 +36,7 @@ export class Workspace {
     root: string;
     allowedCommands: string[];
     allowedPaths: string[];
+    commandInputPaths?: string[];
     forbiddenPaths: string[];
     maxOutputChars?: number;
     maxPatchBytes?: number;
@@ -42,19 +44,28 @@ export class Workspace {
     this.root = resolve(options.root);
     this.allowedCommands = new Set(options.allowedCommands);
     this.allowedPaths = options.allowedPaths;
+    this.commandInputPaths = options.commandInputPaths ?? [];
     this.forbiddenPaths = options.forbiddenPaths;
     this.maxOutputChars = options.maxOutputChars ?? 50_000;
     this.maxPatchBytes = options.maxPatchBytes ?? 1_000_000;
   }
 
   private async assertAllowed(requested: string): Promise<string> {
+    return this.assertPathAllowed(requested, this.allowedPaths);
+  }
+
+  private async assertCommandInputAllowed(requested: string): Promise<string> {
+    return this.assertPathAllowed(requested, [...this.allowedPaths, ...this.commandInputPaths]);
+  }
+
+  private async assertPathAllowed(requested: string, allowedPaths: string[]): Promise<string> {
     const absolute = safeRelativePath(this.root, requested);
     const rel = relative(this.root, absolute).split(sep).join('/');
     if (this.forbiddenPaths.some((pattern) => matchesPath(rel, pattern)))
       throw new HarnessError(`forbidden path: ${requested}`, 'forbidden_path', 2);
     if (
-      this.allowedPaths.length > 0 &&
-      !this.allowedPaths.some((pattern) => matchesPath(rel, pattern))
+      allowedPaths.length > 0 &&
+      !allowedPaths.some((pattern) => matchesPath(rel, pattern))
     )
       throw new HarnessError(`path is outside the allowlist: ${requested}`, 'path_not_allowed', 2);
     const rootReal = await realpath(this.root);
@@ -148,7 +159,8 @@ export class Workspace {
           2,
         );
     } else {
-      for (const path of spec.args.slice(rule.args.length)) await this.assertAllowed(path);
+      for (const path of spec.args.slice(rule.args.length))
+        await this.assertCommandInputAllowed(path);
     }
     if (spec.args.some((arg) => arg.includes('\0')))
       throw new HarnessError('command argument contains NUL', 'invalid_command', 2);
@@ -252,6 +264,7 @@ export async function makeWorkspace(
   policy: {
     allowedCommands: string[];
     allowedPaths: string[];
+    commandInputPaths?: string[];
     forbiddenPaths: string[];
     maxOutputChars?: number;
     maxPatchBytes?: number;

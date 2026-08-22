@@ -486,7 +486,11 @@ async function demoCommand(argv: string[]): Promise<number> {
   if (!claimed)
     throw new HarnessError('offline demo could not claim its fixture task', 'demo_queue');
   await demoQueue.markRunning(normalized.id);
-  const workspace = await makeWorkspace(workspaceRoot, policy);
+  const workspace = await makeWorkspace(workspaceRoot, {
+    ...policy,
+    allowedPaths: task.allowedPaths,
+    commandInputPaths: ['test/public.mjs'],
+  });
   const original = await readFile(join(workspaceRoot, 'src/math.ts'), 'utf8');
   const originalHash = sha256(original);
   const transport = new FakeTransport((_request, call) => {

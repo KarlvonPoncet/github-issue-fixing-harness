@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { mkdtemp, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { AgentRunner } from '../src/agent.js';
@@ -429,6 +429,36 @@ test('all ten benchmark tasks grade deterministically and baseline is known fail
       first.evidence.checks.some(
         (check) => check.phase === 'baseline' && check.status === 'failed',
       ),
+    );
+  }
+});
+
+test('all benchmark public tests run without making test inputs editable', async () => {
+  const root = await mkdtemp('/tmp/issue-harness-public-inputs-');
+  for (const taskView of listBenchmarkTasks()) {
+    const taskRoot = join(root, taskView.id);
+    await materializeBenchmarkTask(taskView.id, taskRoot, 'solution');
+    const python = taskView.language === 'python';
+    const testPath = python ? 'test_public.py' : 'test/public.mjs';
+    const workspace = await makeWorkspace(taskRoot, {
+      allowedCommands: [python ? 'python-test' : 'public-test'],
+      allowedPaths: taskView.allowedPaths,
+      commandInputPaths: [testPath],
+      forbiddenPaths: [],
+    });
+    const result = await workspace.run({
+      name: python ? 'python-test' : 'public-test',
+      executable: python ? 'python3' : 'node',
+      args: python ? ['-m', 'unittest', testPath] : ['--test', testPath],
+      timeoutMs: 2_000,
+      maxOutputChars: 2_000,
+    });
+    assert.equal(result.exitCode, 0, taskView.id);
+    await assert.rejects(() => workspace.inspect(testPath), /outside the allowlist/);
+    const original = await readFile(join(taskRoot, testPath), 'utf8');
+    await assert.rejects(
+      () => workspace.exactEdit(testPath, sha256(original), `${original}\n`),
+      /outside the allowlist/,
     );
   }
 });
