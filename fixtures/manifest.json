@@ -1,0 +1,185 @@
+{
+  "schemaVersion": "v1",
+  "tasks": [
+    {
+      "id": "ts-addition",
+      "language": "typescript",
+      "title": "Correct addition",
+      "issue": "The add helper returns the wrong result for ordinary integer inputs.",
+      "baseState": "frozen-ts-addition-1",
+      "publicCommands": [
+        "node --test test/public.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/index.ts": "7a028932526b2335b8498ca5b3ef850dd81e0df3d8c4dfe856af8ebb8f5dfabb",
+        "src/math.ts": "be5a88e82e68053224f72e67163b989941cb2ee52c865ea27fbc5b1fd8f1f5f0",
+        "test/public.mjs": "23f2a375dd30aafc61276044b0eb08135893a974667efb529f6f33089c1c557c"
+      }
+    },
+    {
+      "id": "ts-positive",
+      "language": "typescript",
+      "title": "Reject negative values",
+      "issue": "parsePositive must reject zero and negative values instead of returning them.",
+      "baseState": "frozen-ts-positive-1",
+      "publicCommands": [
+        "node --test test/public.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/index.ts": "305261a5cb66ad1dc7f36464b7f555abee0b619d157ec44fd3f0cab529cf22d7",
+        "src/parse.ts": "22345efdf440896bc8c6750acb971f76839c03dc1a23bc6c675e6af691294fae",
+        "test/public.mjs": "d301c1a0d458abebfd7ce45ff671211c9f61f556cab5024a382eb2887e4b4a3f"
+      }
+    },
+    {
+      "id": "ts-format-email",
+      "language": "typescript",
+      "title": "Format contact",
+      "issue": "formatContact should include the email in angle brackets when one is present.",
+      "baseState": "frozen-ts-format-email-1",
+      "publicCommands": [
+        "node --test test/public.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/contact.ts": "76adb1a44aac7cc804bb9b6c0df3675b0bfe5e2576848669762159ac84c4bb23",
+        "src/index.ts": "ed84fa726b6492b52c7a6ac69dfbdfff4f5893d298431e5cd4c2f6d4893e391e",
+        "test/public.mjs": "b93558fb866a1e13b61e5121a66d8ea3094f0c0a52c059ef399f08408a68d230"
+      }
+    },
+    {
+      "id": "ts-unique",
+      "language": "typescript",
+      "title": "Stable unique values",
+      "issue": "uniqueValues should remove duplicates while preserving the first-seen order.",
+      "baseState": "frozen-ts-unique-1",
+      "publicCommands": [
+        "node --test test/public.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/index.ts": "b95f179cbe2abc3a7b5447d13429209f209b35a9dfa254f1f20be5aad033b747",
+        "src/unique.ts": "63801e3d660646896f8c126e4c912a148743fdcdfac357beb2441cc27ae941dc",
+        "test/public.mjs": "84af8ce3bee87a4d94f7f3f6a626c0c633b60c4ae22afb31c2c19b5458db4e76"
+      }
+    },
+    {
+      "id": "ts-config-zero",
+      "language": "typescript",
+      "title": "Preserve zero configuration",
+      "issue": "readLimit must preserve an explicitly configured zero and only use the default when the value is absent.",
+      "baseState": "frozen-ts-config-zero-1",
+      "publicCommands": [
+        "node --test test/public.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/config.ts": "7d6c33810d4fb6a5192621c8d58a71ae2f13c998c50ba061376bb3111195feb9",
+        "src/index.ts": "d41c63bb01fe5d033ef245f3ec142bb3e2eab6ccdbd9ecad652bb16ac0af958a",
+        "test/public.mjs": "d5835b10a4d49dd1d6ee70220063c2cd8b5e779141e6b80f83da2270e7f48782"
+      }
+    },
+    {
+      "id": "py-addition",
+      "language": "python",
+      "title": "Correct Python addition",
+      "issue": "The Python add helper subtracts instead of adding.",
+      "baseState": "frozen-py-addition-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "e1a894022d1a082987b87adecb623438c9e386d86b2b621cff4a5fe7fdf7edc8",
+        "test_public.py": "a98a1be3e93e099a4f28479a1b4ecfa1ec9792bd6971729bbe8c9fc82e0e4137"
+      }
+    },
+    {
+      "id": "py-positive",
+      "language": "python",
+      "title": "Validate positive Python input",
+      "issue": "parse_positive must reject zero and negative integers.",
+      "baseState": "frozen-py-positive-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "35c449f0bee400c950302c674ccc76109e406f5c58eb835c5a0687e5928ddb53",
+        "test_public.py": "6238721ee4ee9a7a15ebd62188bb20e376d440abe0c2e0994fb8c8f2428391f2"
+      }
+    },
+    {
+      "id": "py-format-email",
+      "language": "python",
+      "title": "Format Python contact",
+      "issue": "format_contact should include an optional email address.",
+      "baseState": "frozen-py-format-email-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "64181ca26e2095ffee4526cbb2ab1d8e7a652a4f2adf60f02aef115b38778cc4",
+        "test_public.py": "29a45bc2f7047e518e7bb1e33030da4c1450f0d7bc26b15ce4a2f7bd541c64c3"
+      }
+    },
+    {
+      "id": "py-unique",
+      "language": "python",
+      "title": "Stable Python uniqueness",
+      "issue": "unique_values should remove duplicate entries without sorting them.",
+      "baseState": "frozen-py-unique-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "9e8ded0ea646633a02fc4f068d7a30bc4a1e7fbd95f11b2800da93348d1dbefb",
+        "test_public.py": "519be5df5ebef2c064b7218ef027604c40b842d1b1401af84c6bf0f6adb338b7"
+      }
+    },
+    {
+      "id": "py-config-zero",
+      "language": "python",
+      "title": "Preserve Python zero configuration",
+      "issue": "read_limit must preserve zero rather than treating it as missing.",
+      "baseState": "frozen-py-config-zero-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "42ed1044cca753bf243fc07a1e597612a2e6d7b3963b88699197e801c8d175df",
+        "test_public.py": "a146aa22af9258f2ca7719342162009bfc88337deefc28d4dce9c7364afbe6ee"
+      }
+    }
+  ]
+}

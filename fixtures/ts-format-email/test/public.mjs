@@ -1,0 +1,1 @@
+import assert from "node:assert/strict"; import test from "node:test"; import { formatContact } from "../src/index.ts"; test("formats email",()=>assert.equal(formatContact("Ada", "ada@example.test"), "Ada <ada@example.test>"));

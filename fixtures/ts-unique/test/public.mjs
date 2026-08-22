@@ -1,0 +1,1 @@
+import assert from "node:assert/strict"; import test from "node:test"; import { uniqueValues } from "../src/index.ts"; test("keeps order",()=>assert.deepEqual(uniqueValues(["b","a","b"]), ["b","a"]));

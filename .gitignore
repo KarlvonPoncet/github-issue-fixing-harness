@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.log
+.harness/
+.env
+.env.*
+!.env.example
+
+# Local run output; benchmark fixture inputs remain tracked.
+artifacts/
+runs/
