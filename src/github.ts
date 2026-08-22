@@ -2,7 +2,15 @@ import { createHmac } from 'node:crypto';
 import { SCHEMA_VERSION, parseGitHubIssueInput } from './schema.js';
 import type { NormalizedIssueTask, GitHubIssueInput, RepositoryPolicy } from './schema.js';
 import type { DurableQueue } from './queue.js';
-import { hmacEqual, nowIso, HarnessError, SchemaError, sha256, ensureString } from './util.js';
+import {
+  hmacEqual,
+  nowIso,
+  HarnessError,
+  SchemaError,
+  sha256,
+  ensureString,
+  redactSecrets,
+} from './util.js';
 
 export interface IntakeResult {
   accepted: boolean;
@@ -298,17 +306,18 @@ function makeTask(
   return {
     schemaVersion: SCHEMA_VERSION,
     id: sha256(deliveryKey).slice(0, 24),
-    deliveryKey,
-    repository: input.repository,
+    deliveryKey: redactSecrets(deliveryKey),
+    repository: redactSecrets(input.repository),
     number: input.issue.number,
-    title: input.issue.title,
-    body,
-    comments: input.comments?.map((comment) => comment.body ?? '').filter(Boolean) ?? [],
-    links,
+    title: redactSecrets(input.issue.title),
+    body: redactSecrets(body),
+    comments:
+      input.comments?.map((comment) => redactSecrets(comment.body ?? '')).filter(Boolean) ?? [],
+    links: links.map(redactSecrets),
     state: input.issue.state === 'closed' ? 'closed' : 'open',
     labels,
-    author: input.issue.user?.login ?? 'unknown',
-    baseCommit: input.baseCommit,
+    author: redactSecrets(input.issue.user?.login ?? 'unknown'),
+    baseCommit: redactSecrets(input.baseCommit),
     policy,
     risk,
     receivedAt: nowIso(),

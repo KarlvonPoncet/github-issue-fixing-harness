@@ -665,8 +665,7 @@ function help(args: string[]): number {
       'Verify and enqueue a fixture webhook. Required: --file <json> --signature <sha256=...> --secret <secret>. Optional: --repository <owner/name> --base-commit <sha>.',
     'auth login':
       'Explicit browser OAuth flow. Required: --provider openai-codex. Optional: --manual-code <code>.',
-    'auth status':
-      'Show configured provider types and private credential path. No secrets are printed.',
+    'auth status': 'Show configured provider types. No secrets or local paths are printed.',
     'auth logout': 'Remove one credential. Required: --provider <openai|openai-codex>.',
     'providers list':
       'List supported provider profiles, model counts, and non-secret setup paths. No flags.',

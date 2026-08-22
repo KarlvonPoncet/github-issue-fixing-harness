@@ -1,6 +1,7 @@
 import { join } from 'node:path';
+import { parseNormalizedTask } from './schema.js';
 import type { NormalizedIssueTask, QueueState } from './schema.js';
-import { atomicWrite, nowIso, readJson, HarnessError } from './util.js';
+import { atomicWrite, nowIso, readJson, HarnessError, redactSecrets } from './util.js';
 import { LocalIndex } from './storage.js';
 
 export interface QueueEntry {
@@ -66,23 +67,26 @@ export class DurableQueue {
   }
 
   async enqueue(task: NormalizedIssueTask): Promise<{ accepted: boolean; taskId: string }> {
+    const safeTask = parseNormalizedTask(
+      JSON.parse(redactSecrets(JSON.stringify(task))) as unknown,
+    );
     const data = await this.ready();
-    const existing = data.deliveryKeys[task.deliveryKey];
+    const existing = data.deliveryKeys[safeTask.deliveryKey];
     if (existing) return { accepted: false, taskId: existing };
-    const accepted = await this.index.addTask(task);
+    const accepted = await this.index.addTask(safeTask);
     if (!accepted.accepted && accepted.existingId)
       return { accepted: false, taskId: accepted.existingId };
     const next = structuredClone(data);
-    next.entries[task.id] = {
-      taskId: task.id,
-      deliveryKey: task.deliveryKey,
+    next.entries[safeTask.id] = {
+      taskId: safeTask.id,
+      deliveryKey: safeTask.deliveryKey,
       state: 'queued',
       attempts: 0,
       updatedAt: nowIso(),
     };
-    next.deliveryKeys[task.deliveryKey] = task.id;
+    next.deliveryKeys[safeTask.deliveryKey] = safeTask.id;
     await this.persist(next);
-    return { accepted: true, taskId: task.id };
+    return { accepted: true, taskId: safeTask.id };
   }
 
   async get(taskId: string): Promise<{ task: NormalizedIssueTask; entry: QueueEntry } | undefined> {

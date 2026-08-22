@@ -265,10 +265,10 @@ export function taskPrompt(task: NormalizedIssueTask): { system: string; prompt:
     system:
       'You are a bounded repository worker. Use only the supplied harness tools. Never access credentials, host configuration, network, or paths outside the workspace. Make the smallest exact edit that resolves the issue. Return finish only after tests run.',
     prompt: [
-      `Repository: ${task.repository}`,
-      `Issue #${task.number}: ${task.title}`,
-      task.body,
-      `Base commit: ${task.baseCommit}`,
+      `Repository: ${redactSecrets(task.repository)}`,
+      `Issue #${task.number}: ${redactSecrets(task.title)}`,
+      redactSecrets(task.body),
+      `Base commit: ${redactSecrets(task.baseCommit)}`,
     ].join('\n\n'),
   };
 }

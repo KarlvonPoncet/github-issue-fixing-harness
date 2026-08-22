@@ -8,7 +8,7 @@ import {
   parseRunManifest,
 } from './schema.js';
 import type { ArtifactRecord, NormalizedIssueTask, QueueState, RunManifest } from './schema.js';
-import { atomicWrite, nowIso, readJson, sha256 } from './util.js';
+import { atomicWrite, nowIso, readJson, redactSecrets, sha256 } from './util.js';
 
 interface IndexFile {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -174,8 +174,8 @@ export class ArtifactStore {
     content: string | Uint8Array,
     id: string = randomUUID(),
   ): Promise<ArtifactRecord> {
-    const bytes = typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
-    const stored = content;
+    const stored = typeof content === 'string' ? redactSecrets(content) : content;
+    const bytes = typeof stored === 'string' ? Buffer.byteLength(stored) : stored.byteLength;
     const digest = sha256(stored);
     const relativePath = join('artifacts', digest.slice(0, 2), digest);
     const absolutePath = join(this.root, relativePath);

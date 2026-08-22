@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { HarnessError, redactSecrets, safeRelativePath, sha256, withTimeout } from './util.js';
 
 const execFileAsync = promisify(execFile);
@@ -47,7 +47,7 @@ export class Workspace {
     this.maxPatchBytes = options.maxPatchBytes ?? 1_000_000;
   }
 
-  private assertAllowed(requested: string): string {
+  private async assertAllowed(requested: string): Promise<string> {
     const absolute = safeRelativePath(this.root, requested);
     const rel = relative(this.root, absolute).split(sep).join('/');
     if (this.forbiddenPaths.some((pattern) => matchesPath(rel, pattern)))
@@ -57,6 +57,15 @@ export class Workspace {
       !this.allowedPaths.some((pattern) => matchesPath(rel, pattern))
     )
       throw new HarnessError(`path is outside the allowlist: ${requested}`, 'path_not_allowed', 2);
+    const rootReal = await realpath(this.root);
+    const targetReal = await realpath(absolute);
+    const realRelative = relative(rootReal, targetReal);
+    if (
+      realRelative === '..' ||
+      realRelative.startsWith(`..${sep}`) ||
+      realRelative.startsWith(sep)
+    )
+      throw new HarnessError('path escapes the workspace through a symlink', 'unsafe_path', 2);
     return absolute;
   }
 
@@ -64,7 +73,7 @@ export class Workspace {
     requested: string,
     maxBytes = 50_000,
   ): Promise<{ path: string; content: string; sha256: string; truncated: boolean }> {
-    const absolute = this.assertAllowed(requested);
+    const absolute = await this.assertAllowed(requested);
     if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > this.maxOutputChars)
       throw new HarnessError('inspect maxBytes is outside the bound', 'invalid_bound', 2);
     const data = await readFile(absolute);
@@ -78,7 +87,7 @@ export class Workspace {
   }
 
   async list(requested = '.', maxEntries = 200): Promise<string[]> {
-    const absolute = this.assertAllowed(requested);
+    const absolute = await this.assertAllowed(requested);
     const entries = await readdir(absolute, { withFileTypes: true });
     return entries
       .slice(0, maxEntries)
@@ -94,9 +103,11 @@ export class Workspace {
     expectedSha256: string,
     replacement: string,
   ): Promise<{ path: string; sha256: string; bytes: number }> {
-    const absolute = this.assertAllowed(requested);
+    const absolute = await this.assertAllowed(requested);
     if (Buffer.byteLength(replacement) > this.maxPatchBytes)
       throw new HarnessError('edit exceeds patch byte budget', 'patch_too_large', 2);
+    if (redactSecrets(replacement) !== replacement)
+      throw new HarnessError('edit contains secret-like material', 'secret_rejected', 2);
     const original = await readFile(absolute);
     if (sha256(original) !== expectedSha256)
       throw new HarnessError(`edit precondition failed for ${requested}`, 'edit_conflict', 1);
@@ -113,18 +124,36 @@ export class Workspace {
     if (!this.allowedCommands.has(spec.name))
       throw new HarnessError(`command is not allowlisted: ${spec.name}`, 'command_not_allowed', 2);
     const rule = commandRule(spec.name);
+    if (!rule)
+      throw new HarnessError(
+        `command has no safe allowlisted form: ${spec.name}`,
+        'command_not_allowed',
+        2,
+      );
     if (
-      rule &&
-      (basename(spec.executable) !== rule.executable ||
-        !rule.args.every((arg, index) => spec.args[index] === arg))
+      spec.executable !== rule.executable ||
+      !rule.args.every((arg, index) => spec.args[index] === arg)
     )
       throw new HarnessError(
         `command does not match the allowlisted form: ${spec.name}`,
         'command_not_allowed',
         2,
       );
+    if (spec.name === 'git-diff') {
+      const expected = ['git', 'diff', '--no-ext-diff', '--binary', '--', ...this.allowedPaths];
+      if (JSON.stringify([spec.executable, ...spec.args]) !== JSON.stringify(expected))
+        throw new HarnessError(
+          'git-diff may only inspect the configured workspace paths',
+          'command_not_allowed',
+          2,
+        );
+    } else {
+      for (const path of spec.args.slice(rule.args.length)) await this.assertAllowed(path);
+    }
     if (spec.args.some((arg) => arg.includes('\0')))
       throw new HarnessError('command argument contains NUL', 'invalid_command', 2);
+    if ([spec.executable, ...spec.args].some((part) => redactSecrets(part) !== part))
+      throw new HarnessError('command contains secret-like material', 'secret_rejected', 2);
     const started = Date.now();
     const child = execFileAsync(spec.executable, spec.args, {
       cwd: this.root,

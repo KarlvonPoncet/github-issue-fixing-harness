@@ -141,9 +141,8 @@ export async function loginCodex(
 
 export async function authStatus(
   store: FileCredentialStore,
-): Promise<{ path: string; providers: Array<{ provider: string; type: string }> }> {
+): Promise<{ providers: Array<{ provider: string; type: string }> }> {
   return {
-    path: store.filePath,
     providers: (await store.list()).map((item) => ({ provider: item.providerId, type: item.type })),
   };
 }

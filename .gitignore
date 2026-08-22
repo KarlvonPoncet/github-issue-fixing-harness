@@ -10,3 +10,10 @@ coverage/
 # Local run output; benchmark fixture inputs remain tracked.
 artifacts/
 runs/
+
+# Credential material and local auth configuration.
+.npmrc
+*.key
+*.pem
+auth.json
+credentials/

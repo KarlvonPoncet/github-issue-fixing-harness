@@ -2,6 +2,21 @@
   "name": "issue-harness",
   "version": "0.1.0",
   "description": "A bounded, durable agent harness for GitHub issue work and deterministic evaluation.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KarlvonPoncet/github-issue-fixing-harness.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KarlvonPoncet/github-issue-fixing-harness/issues"
+  },
+  "keywords": [
+    "github",
+    "issue",
+    "agent",
+    "benchmark",
+    "harness"
+  ],
   "type": "module",
   "bin": {
     "issue-harness": "dist/cli.js"
@@ -16,6 +31,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "package:check": "node scripts/check-package.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",

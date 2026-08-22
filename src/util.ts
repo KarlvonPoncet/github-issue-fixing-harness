@@ -203,10 +203,27 @@ export function toToon(value: unknown, indent = 0): string {
 
 export function redactSecrets(value: string): string {
   return value
-    .replace(/(sk-[A-Za-z0-9_-]{8,})/g, '[REDACTED_API_KEY]')
-    .replace(/(gh[pousr]_[A-Za-z0-9_]{8,})/g, '[REDACTED_GITHUB_TOKEN]')
+    .replace(
+      /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+      '[REDACTED_PRIVATE_KEY]',
+    )
+    .replace(/\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{8,})\b/g, '[REDACTED_API_KEY]')
+    .replace(
+      /\b(?:gh[pousr]_[A-Za-z0-9_-]{8,}|github_pat_[A-Za-z0-9_-]{16,})\b/g,
+      '[REDACTED_GITHUB_TOKEN]',
+    )
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED_AWS_ACCESS_KEY]')
+    .replace(/\bxox[baprs]-[0-9A-Za-z-]{16,}\b/g, '[REDACTED_SLACK_TOKEN]')
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[REDACTED_JWT]')
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[REDACTED]')
-    .replace(/(OPENAI_API_KEY|API_KEY|TOKEN|SECRET)\s*[=:]\s*[^\s,;]+/gi, '$1=[REDACTED]');
+    .replace(
+      /((?:api[_-]?key|access[_-]?token|authorization|password|passwd|secret|token|cookie|session[_-]?token|private[_-]?key|client[_-]?secret|refresh[_-]?token|id[_-]?token)\s*=\s*["']?)([^\s"',;}{]{8,})/gi,
+      '$1[REDACTED_SECRET]',
+    )
+    .replace(
+      /(["'](?:api[_-]?key|access[_-]?token|authorization|password|passwd|secret|token|cookie|session[_-]?token|private[_-]?key|client[_-]?secret|refresh[_-]?token|id[_-]?token)["']\s*:\s*["'])([^"']{8,})(["'])/gi,
+      '$1[REDACTED_SECRET]$3',
+    );
 }
 
 export function withTimeout<T>(
