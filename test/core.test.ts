@@ -1,17 +1,18 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { mkdtemp, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { AgentRunner } from '../src/agent.js';
 import { FileCredentialStore, authStatus } from '../src/auth.js';
-import { FakeTransport, ReplayTransport } from '../src/model.js';
+import { FakeTransport, ReplayTransport, taskPrompt } from '../src/model.js';
 import { gradeBenchmark, listBenchmarkTasks, materializeBenchmarkTask } from '../src/benchmarks.js';
 import { GitHubPollingAdapter, GitHubWebhookAdapter } from '../src/github.js';
 import { DurableQueue } from '../src/queue.js';
+import { ArtifactStore } from '../src/storage.js';
 import { parseNormalizedTask, SCHEMA_VERSION } from '../src/schema.js';
 import { makeWorkspace } from '../src/workspace.js';
-import { nowIso, sha256 } from '../src/util.js';
+import { nowIso, redactSecrets, sha256 } from '../src/util.js';
 
 function policy(repository: string) {
   return {
@@ -82,7 +83,7 @@ test('webhook verifies signatures, filters events, and deduplicates retries', as
   const root = await mkdtemp('/tmp/issue-harness-webhook-');
   const queue = new DurableQueue(root);
   await queue.init();
-  const secret = 'fixture-secret';
+  const secret = ['fixture', '-secret'].join('');
   const body = JSON.stringify({
     action: 'opened',
     repository: { full_name: 'acme/repo', default_branch: 'main' },
@@ -165,7 +166,8 @@ test('poll reconciliation persists a cursor and handles out-of-order results', a
 
 test('workspace tools defend boundaries, redact output, and enforce commands', async () => {
   const root = await mkdtemp('/tmp/issue-harness-workspace-');
-  await writeFile(join(root, 'src.txt'), 'token=sk-1234567890\n', 'utf8');
+  const fixtureToken = ['sk-', 'fixture-secret-value'].join('');
+  await writeFile(join(root, 'src.txt'), `token=${fixtureToken}\n`, 'utf8');
   const workspace = await makeWorkspace(root, {
     allowedCommands: ['node-test'],
     allowedPaths: ['src.txt'],
@@ -186,16 +188,109 @@ test('workspace tools defend boundaries, redact output, and enforce commands', a
     /not allowlisted/,
   );
   await assert.rejects(() => workspace.exactEdit('src.txt', sha256('wrong'), 'x'), /precondition/);
+  await assert.rejects(
+    () =>
+      workspace.exactEdit('src.txt', sha256(`token=${fixtureToken}\n`), `token=${fixtureToken}`),
+    /secret-like/,
+  );
+
+  const outside = await mkdtemp('/tmp/issue-harness-outside-');
+  await writeFile(join(outside, 'secret.txt'), 'private', 'utf8');
+  await symlink(join(outside, 'secret.txt'), join(root, 'link.txt'));
+  const symlinkWorkspace = await makeWorkspace(root, {
+    allowedCommands: [],
+    allowedPaths: ['link.txt'],
+    forbiddenPaths: [],
+  });
+  await assert.rejects(() => symlinkWorkspace.inspect('link.txt'), /symlink/);
+
+  const priorKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = fixtureToken;
+  try {
+    await writeFile(
+      join(root, 'check.mjs'),
+      'import test from "node:test"; test("env", () => { if (process.env.OPENAI_API_KEY) throw new Error("secret inherited"); });',
+      'utf8',
+    );
+    const checkWorkspace = await makeWorkspace(root, {
+      allowedCommands: ['node-test'],
+      allowedPaths: ['check.mjs'],
+      forbiddenPaths: [],
+    });
+    const result = await checkWorkspace.run({
+      name: 'node-test',
+      executable: 'node',
+      args: ['--test', 'check.mjs'],
+      timeoutMs: 1_000,
+      maxOutputChars: 1_000,
+    });
+    assert.equal(result.exitCode, 0);
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /fixture-secret-value/);
+  } finally {
+    if (priorKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = priorKey;
+  }
+
+  const artifacts = new ArtifactStore(join(root, 'artifacts'));
+  await artifacts.init();
+  const record = await artifacts.put('evidence', `token=${fixtureToken}`);
+  assert.doesNotMatch((await artifacts.get(record)).toString('utf8'), /fixture-secret-value/);
 });
 
 test('credential store is private and status never exposes credential values', async () => {
   const root = await mkdtemp('/tmp/issue-harness-auth-');
   const store = new FileCredentialStore(join(root, 'auth.json'));
-  await store.modify('openai', async () => ({ type: 'api_key', key: 'sk-test-secret-value' }));
+  const storedKey = ['sk-', 'fixture-auth-secret-value'].join('');
+  await store.modify('openai', async () => ({ type: 'api_key', key: storedKey }));
   const info = await authStatus(store);
   assert.deepEqual(info.providers, [{ provider: 'openai', type: 'api_key' }]);
   assert.equal((await stat(store.filePath)).mode & 0o077, 0);
   assert.doesNotMatch(JSON.stringify(info), /sk-test/);
+  assert.doesNotMatch(
+    JSON.stringify(info),
+    new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  );
+});
+
+test('redaction covers realistic provider and browser credential shapes', () => {
+  const apiKey = ['sk-proj-', 'fixture-key-material-123456'].join('');
+  const githubToken = ['github_pat_', 'fixture-token-material-123456'].join('');
+  const bearer = ['Bearer ', 'fixture-bearer-material-123456'].join('');
+  const awsKey = ['AKIA', 'ABCDEFGHIJKLMNOP'].join('');
+  const slackToken = ['xoxb-', 'fixture-slack-material-123456'].join('');
+  const jwt = [
+    'eyJ',
+    'fixtureheader123456',
+    '.',
+    'fixturesignature123456',
+    '.',
+    'fixtureclaim123456',
+  ].join('');
+  const privateKey = [
+    ['-----BEGIN OPENSSH ', 'PRIVATE KEY-----'].join(''),
+    'fixture-private-material',
+    ['-----END OPENSSH ', 'PRIVATE KEY-----'].join(''),
+  ].join('\\n');
+  const input = [
+    `OPENAI_API_KEY=${apiKey}`,
+    `Authorization: ${bearer}`,
+    `github_pat=${githubToken}`,
+    `AWS_ACCESS_KEY_ID=${awsKey}`,
+    `token=${slackToken}`,
+    `session_token: "${jwt}"`,
+    privateKey,
+  ].join('\\n');
+  const output = redactSecrets(input);
+  for (const secret of [apiKey, githubToken, bearer.slice(7), awsKey, slackToken, jwt, privateKey])
+    assert.doesNotMatch(output, new RegExp(secret.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')));
+  assert.match(output, /REDACTED/);
+});
+
+test('task prompts redact untrusted issue content', () => {
+  const promptKey = ['sk-proj-', 'fixture-prompt-material-123456'].join('');
+  const prompt = taskPrompt({ ...task('prompt-secret'), body: `Use token=${promptKey}.` });
+  assert.doesNotMatch(prompt.prompt, new RegExp(promptKey));
+  assert.match(prompt.prompt, /REDACTED/);
 });
 
 test('fake and replay transports have deterministic contracts', async () => {
@@ -334,6 +429,36 @@ test('all ten benchmark tasks grade deterministically and baseline is known fail
       first.evidence.checks.some(
         (check) => check.phase === 'baseline' && check.status === 'failed',
       ),
+    );
+  }
+});
+
+test('all benchmark public tests run without making test inputs editable', async () => {
+  const root = await mkdtemp('/tmp/issue-harness-public-inputs-');
+  for (const taskView of listBenchmarkTasks()) {
+    const taskRoot = join(root, taskView.id);
+    await materializeBenchmarkTask(taskView.id, taskRoot, 'solution');
+    const python = taskView.language === 'python';
+    const testPath = python ? 'test_public.py' : 'test/public.mjs';
+    const workspace = await makeWorkspace(taskRoot, {
+      allowedCommands: [python ? 'python-test' : 'public-test'],
+      allowedPaths: taskView.allowedPaths,
+      commandInputPaths: [testPath],
+      forbiddenPaths: [],
+    });
+    const result = await workspace.run({
+      name: python ? 'python-test' : 'public-test',
+      executable: python ? 'python3' : 'node',
+      args: python ? ['-m', 'unittest', testPath] : ['--test', testPath],
+      timeoutMs: 2_000,
+      maxOutputChars: 2_000,
+    });
+    assert.equal(result.exitCode, 0, taskView.id);
+    await assert.rejects(() => workspace.inspect(testPath), /outside the allowlist/);
+    const original = await readFile(join(taskRoot, testPath), 'utf8');
+    await assert.rejects(
+      () => workspace.exactEdit(testPath, sha256(original), `${original}\n`),
+      /outside the allowlist/,
     );
   }
 });

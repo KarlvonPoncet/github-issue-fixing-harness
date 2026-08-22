@@ -486,7 +486,11 @@ async function demoCommand(argv: string[]): Promise<number> {
   if (!claimed)
     throw new HarnessError('offline demo could not claim its fixture task', 'demo_queue');
   await demoQueue.markRunning(normalized.id);
-  const workspace = await makeWorkspace(workspaceRoot, policy);
+  const workspace = await makeWorkspace(workspaceRoot, {
+    ...policy,
+    allowedPaths: task.allowedPaths,
+    commandInputPaths: ['test/public.mjs'],
+  });
   const original = await readFile(join(workspaceRoot, 'src/math.ts'), 'utf8');
   const originalHash = sha256(original);
   const transport = new FakeTransport((_request, call) => {
@@ -665,8 +669,7 @@ function help(args: string[]): number {
       'Verify and enqueue a fixture webhook. Required: --file <json> --signature <sha256=...> --secret <secret>. Optional: --repository <owner/name> --base-commit <sha>.',
     'auth login':
       'Explicit browser OAuth flow. Required: --provider openai-codex. Optional: --manual-code <code>.',
-    'auth status':
-      'Show configured provider types and private credential path. No secrets are printed.',
+    'auth status': 'Show configured provider types. No secrets or local paths are printed.',
     'auth logout': 'Remove one credential. Required: --provider <openai|openai-codex>.',
     'providers list':
       'List supported provider profiles, model counts, and non-secret setup paths. No flags.',

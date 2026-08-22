@@ -1,5 +1,7 @@
 # issue-harness
 
+[![CI](https://github.com/KarlvonPoncet/github-issue-fixing-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/KarlvonPoncet/github-issue-fixing-harness/actions/workflows/ci.yml)
+
 `issue-harness` is a local-first, own-agent worker for GitHub issues. It owns intake, a durable queue, a bounded repository worker, artifacts, and deterministic grading; it does **not** launch the Pi TUI or a Pi subprocess.
 
 ## Quick start
@@ -7,6 +9,7 @@
 ```sh
 npm ci
 npm run check
+npm run package:check
 npm run demo
 node dist/cli.js bench list
 node dist/cli.js bench summary --solutions
@@ -69,7 +72,7 @@ issue-harness auth status
 issue-harness auth logout --provider openai-codex
 ```
 
-Credentials are app-private at `${ISSUE_HARNESS_AUTH_FILE:-~/.config/issue-harness/auth.json}`, created with mode `0600`; status only reports provider and credential type. No browser cookies, session tokens, or host browser state are copied. The current installed public package is `@earendil-works/pi-ai@0.84.2`, whose authoritative boundary is `createModels()` plus `openaiProvider()` / `openaiCodexProvider()` and `Models.completeSimple()`. `PiModelTransport` normalizes that response into the harness-owned `ModelTransport` interface, so provider SDK types do not enter queue, prompts, tools, or evidence. Fakes and replays implement the same interface for every automated path.
+Credentials are app-private at `${ISSUE_HARNESS_AUTH_FILE:-~/.config/issue-harness/auth.json}`, created with mode `0600`; status only reports provider and credential type, never a local path or credential value. No browser cookies, session tokens, or host browser state are copied. The current installed public package is `@earendil-works/pi-ai@0.84.2`, whose authoritative boundary is `createModels()` plus `openaiProvider()` / `openaiCodexProvider()` and `Models.completeSimple()`. `PiModelTransport` normalizes that response into the harness-owned `ModelTransport` interface, so provider SDK types do not enter queue, prompts, tools, or evidence. Fakes and replays implement the same interface for every automated path.
 
 ## Webhook and polling adapters
 
@@ -84,7 +87,7 @@ node dist/cli.js webhook ingest --file fixture.json --signature "$SIG" --secret 
 
 ## Benchmark methodology
 
-There are five compact TypeScript and five Python tasks. Each freezes base files, issue text, commands, allowed paths, public regression checks, and a hidden test. `bench view` exposes only solver-facing metadata and base file names; hidden tests and reference candidates stay inside the grader. Grading runs:
+There are five compact TypeScript and five Python tasks. Each freezes base files, issue text, commands, allowed paths, public regression checks, and a hidden test. The tracked `fixtures/` tree contains only base files and public checks; `bench view` exposes only solver-facing metadata and base file names, never reference candidates or hidden checks. Grading runs:
 
 1. baseline public checks (the expected failing-before regression signal),
 2. candidate public checks,
@@ -116,7 +119,23 @@ npm run build
 npm run demo
 ```
 
-The lockfile is committed. Fixtures are source-controlled; generated `.harness`, temporary workspaces, credentials, and run artifacts are not.
+The lockfile is committed. `npm run package:check` verifies that publication contains only `dist/`, `README.md`, `LICENSE`, and package metadata. Fixtures are source-controlled; generated `.harness`, temporary workspaces, credentials, and run artifacts are not.
+
+## Publication safety
+
+The CI workflow uses least-privilege read-only permissions, immutable action
+revisions, clean `npm ci`, production dependency auditing, formatting/lint/type
+checks, tests, package-content checks, and the offline demo. Dependabot watches
+both npm dependencies and GitHub Actions. No workflow or automated test needs
+live GitHub, OpenAI, OAuth, browser-cookie, or API credentials.
+
+Before release, scan the tracked tree and every reachable Git object with a
+secret scanner that checks private-key blocks, provider tokens, JWTs, cloud
+keys, bearer credentials, and secret-assignment forms. Review redacts values;
+only match type and location are recorded. The checked-in fixtures use
+constructed placeholders in tests, not live credentials. `npm audit
+--omit=dev --audit-level=high` and `npm run package:check` are the dependency
+and package-content gates used by CI.
 
 ## Phase boundary
 
