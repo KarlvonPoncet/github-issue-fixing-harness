@@ -63,10 +63,7 @@ export class Workspace {
     const rel = relative(this.root, absolute).split(sep).join('/');
     if (this.forbiddenPaths.some((pattern) => matchesPath(rel, pattern)))
       throw new HarnessError(`forbidden path: ${requested}`, 'forbidden_path', 2);
-    if (
-      allowedPaths.length > 0 &&
-      !allowedPaths.some((pattern) => matchesPath(rel, pattern))
-    )
+    if (allowedPaths.length > 0 && !allowedPaths.some((pattern) => matchesPath(rel, pattern)))
       throw new HarnessError(`path is outside the allowlist: ${requested}`, 'path_not_allowed', 2);
     const rootReal = await realpath(this.root);
     const targetReal = await realpath(absolute);

@@ -123,7 +123,7 @@ The lockfile is committed. `npm run package:check` verifies that publication con
 
 ## Publication safety
 
-The release workflow uses least-privilege read-only permissions, immutable action
+The CI workflow uses least-privilege read-only permissions, immutable action
 revisions, clean `npm ci`, production dependency auditing, formatting/lint/type
 checks, tests, package-content checks, and the offline demo. Dependabot watches
 both npm dependencies and GitHub Actions. No workflow or automated test needs
