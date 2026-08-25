@@ -52,6 +52,18 @@ correct patch. In particular, the present `task run` evidence has an empty
 checks list and derives its success booleans from the worker terminal outcome.
 That is a known correctness gap, not a guarantee.
 
+Each run carries a parsed `Budget` that caps state-machine steps, model calls,
+per-state retries, model-call time, model input/output, and patch size. The
+worker retries a failed state only within that run and records each retry as a
+warning event; it has no cross-run retry scheduler or backoff policy. Reaching
+the step or model-call cap produces a budget failure, a model-call timeout
+produces a timed-out outcome, and exhausting state retries produces a failed or
+timed-out outcome according to the failure category. The CLI's current `task
+run` budget allows 20 steps, 20 model calls, and one retry per state. Its
+model-call timeout is the task policy's `maxCommandMs` value. These execution
+bounds do not impose CPU, memory, process, or network limits on repository
+commands.
+
 ## Core contracts
 
 - `src/schema.ts` defines version `v1`, normalized tasks, policy, queue/agent
@@ -98,10 +110,11 @@ directory and infer serialized behavior.
 
 `NormalizedIssueTask.baseCommit` is evidence metadata supplied by the source.
 The webhook adapter currently fills it from the repository default-branch field
-(the branch name, or `unknown`), and the CLI fixture adapter does likewise
-unless a library caller supplies another value. No current run path verifies an
-exact commit object or checks out that base. The polling client can provide a
-value, but it is still not validated by the harness.
+(the branch name, or `unknown`), including when invoked by the CLI fixture
+command. Although that command currently accepts `--base-commit`, it does not
+apply the flag. No current run path verifies an exact commit object or checks
+out that base. The polling client can provide a value, but it is still not
+validated by the harness.
 
 No branch creation, commit, push, draft PR, review request, merge, or GitHub
 status/reporting action is implemented in this phase. A caller can inspect the
