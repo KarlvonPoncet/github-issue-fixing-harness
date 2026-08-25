@@ -75,8 +75,10 @@ Credential files are written with mode `0600` and existing non-private files are
 rejected. CLI provider/status output does not print values or local credential
 paths. Artifacts are redacted before string storage, but operators must still
 avoid putting sensitive data in issue bodies, fixtures, prompts, patches, logs,
-or evidence. Review and CI secret scanning record match type/location rather
-than values; see `SECURITY.md` for reporting policy.
+or evidence. CI currently runs dependency auditing, project checks, package
+content checks, and the offline demo; it does not run secret scanning. Any
+manual or release secret scan should record only the match type and location,
+not the matched value. See `SECURITY.md` for reporting policy.
 
 ## What is not protected today
 
