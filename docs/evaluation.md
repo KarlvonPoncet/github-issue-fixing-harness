@@ -52,6 +52,28 @@ Do not publish an aggregate benchmark claim without naming the fixture set,
 solver/model version, evaluator version, attempt policy, timeout, and whether
 results are reference sanity or model runs.
 
+## Reports and token accounting
+
+`bench grade` and `bench summary` include a versioned `report` in their TOON
+output. Pass `--output <file>` to persist the same report as redacted JSON.
+Each report records the fixture-set/evaluator version, case identity and base
+state, attempt policy, timeout, provider/model identity when supplied, seed
+when supplied, start/end timestamps, per-case outcome and timing, and aggregate
+counts. The evidence alongside each case remains the source for individual
+check commands, statuses, and redacted output.
+
+The deterministic grader does not invoke a model. Its every-case usage record
+therefore has `provenance: not_applicable` and null token totals; null means
+that a value was not reported, never zero usage. When a model run is associated
+with a grade through the library API, one usage sample is retained per model
+call, including retries and provider failures that carry usage. Input, output,
+cached-input, cache-write, reasoning, and total token fields are summed only
+when present for every relevant call; otherwise the aggregate field is null.
+`missingCalls`, `partialCalls`, and `provenance` make incomplete accounting
+explicit. Costs stay null unless pricing is explicitly marked configured and
+trusted; `costProvenance` records that decision. No secret, credential, or
+local attempt path belongs in a report.
+
 ## Required test layers for future work
 
 The existing `test/core.test.ts` covers important deterministic contracts:

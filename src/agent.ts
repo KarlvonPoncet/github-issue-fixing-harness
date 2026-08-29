@@ -10,7 +10,10 @@ import type {
   TerminalOutcome,
 } from './schema.js';
 import { taskPrompt } from './model.js';
+import { ModelTransportError } from './model.js';
 import type { ModelResponse, ModelToolCall, ModelTransport } from './model.js';
+import { summarizeUsage, unavailableUsage } from './usage.js';
+import type { ModelUsage, UsageSummary } from './usage.js';
 import type { Workspace } from './workspace.js';
 import { HarnessError, nowIso, redactSecrets, withTimeout } from './util.js';
 
@@ -33,6 +36,8 @@ export interface AgentRunOptions {
   runId?: string;
   signal?: AbortSignal;
   onEvent?: (event: RunEvent) => Promise<void> | void;
+  /** Cost totals are withheld unless pricing evidence has been configured. */
+  costsTrusted?: boolean;
 }
 
 export interface AgentRunResult {
@@ -45,7 +50,7 @@ export interface AgentRunResult {
     failureCategory?: string;
     residualRisks: string[];
   };
-  usage: { modelCalls: number; inputTokens: number; outputTokens: number; costUsd: number };
+  usage: UsageSummary;
 }
 
 export class AgentRunner {
@@ -56,7 +61,8 @@ export class AgentRunner {
   private steps = 0;
   private readonly retries = new Map<AgentState, number>();
   private lastFailure = '';
-  private usage = { modelCalls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  private readonly usageSamples: Array<ModelUsage | undefined> = [];
+  private usage: UsageSummary = unavailableUsage();
   private runId = '';
 
   constructor(private readonly options: AgentRunOptions) {}
@@ -83,6 +89,7 @@ export class AgentRunner {
       provider: profile,
       harnessVersion: '0.1.0',
       budget,
+      usage: this.usage,
       artifactIds: [],
     };
     if (task.risk !== 'normal' || task.policy.requireHumanReviewFor.includes(task.risk)) {
@@ -180,6 +187,7 @@ export class AgentRunner {
     const response = await this.ask({
       ...prompt,
       prompt: `${prompt.prompt}\n\nCurrent state: ${state}.`,
+      state,
     });
     if (response.text)
       this.history.push({
@@ -203,27 +211,53 @@ export class AgentRunner {
     return next ? { next } : { next: 'terminal' };
   }
 
-  private async ask(request: { system: string; prompt: string }): Promise<ModelResponse> {
-    if (++this.modelCalls > this.options.budget.maxModelCalls)
+  private async ask(request: {
+    system: string;
+    prompt: string;
+    state: AgentState;
+  }): Promise<ModelResponse> {
+    if (this.modelCalls >= this.options.budget.maxModelCalls)
       throw new HarnessError('model call budget exhausted', 'budget_exhausted');
-    const response = await withTimeout(
-      this.options.transport.complete({
-        profile: this.options.profile,
-        system: request.system,
-        prompt: request.prompt.slice(0, this.options.budget.maxInputChars),
-        history: this.history,
-        budget: this.options.budget,
-        signal: this.options.signal,
-      }),
-      this.options.budget.timeoutMs,
-      'model call',
-      this.options.signal,
-    );
-    this.usage.modelCalls += 1;
-    this.usage.inputTokens += response.usage?.inputTokens ?? 0;
-    this.usage.outputTokens += response.usage?.outputTokens ?? 0;
-    this.usage.costUsd += response.usage?.costUsd ?? 0;
+    this.modelCalls += 1;
+    let response: ModelResponse;
+    try {
+      response = await withTimeout(
+        this.options.transport.complete({
+          profile: this.options.profile,
+          system: request.system,
+          prompt: request.prompt.slice(0, this.options.budget.maxInputChars),
+          history: this.history,
+          budget: this.options.budget,
+          signal: this.options.signal,
+        }),
+        this.options.budget.timeoutMs,
+        'model call',
+        this.options.signal,
+      );
+    } catch (error) {
+      await this.recordUsage(
+        request.state,
+        error instanceof ModelTransportError ? error.usage : undefined,
+      );
+      throw error;
+    }
+    await this.recordUsage(request.state, response.usage);
     return response;
+  }
+
+  private async recordUsage(state: AgentState, usage: ModelUsage | undefined): Promise<void> {
+    this.usageSamples.push(usage);
+    this.usage = summarizeUsage(this.usageSamples, this.options.costsTrusted ?? false);
+    await this.event('model_usage', state, {
+      call: this.modelCalls,
+      reported: usage !== undefined,
+      inputTokens: usage?.inputTokens ?? null,
+      outputTokens: usage?.outputTokens ?? null,
+      cachedInputTokens: usage?.cachedInputTokens ?? null,
+      cacheWriteTokens: usage?.cacheWriteTokens ?? null,
+      reasoningTokens: usage?.reasoningTokens ?? null,
+      totalTokens: usage?.totalTokens ?? null,
+    });
   }
 
   private async invokeTool(tool: ModelToolCall, state: AgentState): Promise<string> {
@@ -315,8 +349,10 @@ export class AgentRunner {
     terminal: AgentRunResult['terminal'],
   ): Promise<AgentRunResult> {
     const patch = await this.options.workspace.diff().catch(() => '');
+    this.usage = summarizeUsage(this.usageSamples, this.options.costsTrusted ?? false);
     manifest.updatedAt = nowIso();
     manifest.agentState = 'terminal';
+    manifest.usage = this.usage;
     manifest.status =
       terminal.outcome === 'resolved'
         ? 'succeeded'

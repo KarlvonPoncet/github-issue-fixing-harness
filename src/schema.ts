@@ -8,6 +8,8 @@ import {
   rejectUnknown,
   SchemaError,
 } from './util.js';
+import { parseUsageSummary, unavailableUsage } from './usage.js';
+import type { UsageSummary } from './usage.js';
 
 export const SCHEMA_VERSION = 'v1';
 export type IssueState = 'open' | 'closed';
@@ -90,6 +92,7 @@ export interface RunEvent {
     | 'tool_call'
     | 'tool_result'
     | 'check'
+    | 'model_usage'
     | 'warning'
     | 'terminal';
   state: AgentState;
@@ -109,6 +112,7 @@ export interface RunManifest {
   provider: ProviderModelProfile;
   harnessVersion: string;
   budget: Budget;
+  usage: UsageSummary;
   artifactIds: string[];
   terminal?: TerminalOutcome;
   failureCategory?: string;
@@ -134,6 +138,7 @@ export interface GradingEvidence {
   forbiddenPathsTouched: string[];
   checks: CheckOutcome[];
   elapsedMs: number;
+  usage: UsageSummary;
   failureCategory?: string;
   residualRisks: string[];
 }
@@ -482,6 +487,7 @@ export function parseRunEvent(input: unknown): RunEvent {
             'tool_call',
             'tool_result',
             'check',
+            'model_usage',
             'warning',
             'terminal',
           ] as const,
@@ -521,6 +527,7 @@ export function parseRunManifest(input: unknown): RunManifest {
       'provider',
       'harnessVersion',
       'budget',
+      'usage',
       'artifactIds',
       'terminal',
       'failureCategory',
@@ -590,6 +597,10 @@ export function parseRunManifest(input: unknown): RunManifest {
       'manifest',
     ),
     budget: parseBudget(required(r, 'budget', (v) => v, 'manifest')),
+    usage:
+      'usage' in r && r.usage !== undefined
+        ? parseUsageSummary(r.usage, 'manifest.usage')
+        : unavailableUsage(),
     artifactIds: stringArray(r.artifactIds, 'manifest.artifactIds', 500),
     terminal: optional(
       r,
@@ -635,6 +646,7 @@ export function parseGradingEvidence(input: unknown): GradingEvidence {
       'forbiddenPathsTouched',
       'checks',
       'elapsedMs',
+      'usage',
       'failureCategory',
       'residualRisks',
     ],
@@ -712,6 +724,10 @@ export function parseGradingEvidence(input: unknown): GradingEvidence {
       (v, p) => ensureNumber(v, p, { integer: true, min: 0 }),
       'evidence',
     ),
+    usage:
+      'usage' in r && r.usage !== undefined
+        ? parseUsageSummary(r.usage, 'evidence.usage')
+        : unavailableUsage(),
     failureCategory: optional(
       r,
       'failureCategory',
