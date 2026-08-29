@@ -3,10 +3,18 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { basename, dirname, join, relative } from 'node:path';
 import { SCHEMA_VERSION } from './schema.js';
-import type { CheckOutcome, GradingEvidence } from './schema.js';
-import { HarnessError, redactSecrets, sha256, withTimeout } from './util.js';
+import type { CheckOutcome, GradingEvidence, ProviderModelProfile } from './schema.js';
+import {
+  aggregateUsage,
+  notApplicableUsage,
+  parseUsageSummary,
+  type UsageSummary,
+} from './usage.js';
+import { HarnessError, atomicWrite, nowIso, redactSecrets, sha256, withTimeout } from './util.js';
 
 const execFileAsync = promisify(execFile);
+
+export const EVALUATOR_VERSION = 'local-deterministic-v1' as const;
 
 export interface BenchmarkTaskView {
   id: string;
@@ -353,13 +361,56 @@ export async function materializeBenchmarkTask(
   }
 }
 
+export const BENCHMARK_VERSION = 'frozen-v1';
+
 export interface GradeOptions {
   taskId: string;
   attempt?: string;
   patch?: string;
   runId?: string;
   maxCommandMs?: number;
+  usage?: UsageSummary;
+  provider?: ProviderModelProfile;
+  seed?: string;
 }
+
+export interface BenchmarkCaseReport {
+  caseId: string;
+  baseState: string;
+  language: BenchmarkTaskView['language'];
+  outcome: 'resolved' | 'failed';
+  resolvedAt1: boolean;
+  regressionFree: boolean;
+  elapsedMs: number;
+  checkCount: number;
+  failureCategory?: string;
+  usage: UsageSummary;
+}
+
+export interface BenchmarkRunReport {
+  schemaVersion: typeof SCHEMA_VERSION;
+  runId: string;
+  benchmarkVersion: typeof BENCHMARK_VERSION;
+  evaluatorVersion: typeof EVALUATOR_VERSION;
+  mode: 'grader' | 'reference_sanity';
+  startedAt: string;
+  completedAt: string;
+  configuration: {
+    timeoutMs: number;
+    attemptPolicy: 'directory' | 'patch';
+    provider: ProviderModelProfile | null;
+    seed: string | null;
+  };
+  cases: BenchmarkCaseReport[];
+  aggregate: {
+    caseCount: number;
+    resolvedAt1: number;
+    regressionFree: number;
+    elapsedMs: number;
+    usage: UsageSummary;
+  };
+}
+
 export interface GradeResult {
   evidence: GradingEvidence;
   summary: {
@@ -369,11 +420,63 @@ export interface GradeResult {
     elapsedMs: number;
     failureCategory?: string;
   };
+  report: BenchmarkRunReport;
+}
+
+export function createBenchmarkRunReport(options: {
+  runId: string;
+  mode: BenchmarkRunReport['mode'];
+  startedAt: string;
+  completedAt: string;
+  timeoutMs: number;
+  attemptPolicy: BenchmarkRunReport['configuration']['attemptPolicy'];
+  provider?: ProviderModelProfile;
+  seed?: string;
+  cases: BenchmarkCaseReport[];
+}): BenchmarkRunReport {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    runId: options.runId,
+    benchmarkVersion: BENCHMARK_VERSION,
+    evaluatorVersion: EVALUATOR_VERSION,
+    mode: options.mode,
+    startedAt: options.startedAt,
+    completedAt: options.completedAt,
+    configuration: {
+      timeoutMs: options.timeoutMs,
+      attemptPolicy: options.attemptPolicy,
+      provider: options.provider ?? null,
+      seed: options.seed ?? null,
+    },
+    cases: options.cases,
+    aggregate: {
+      caseCount: options.cases.length,
+      resolvedAt1: options.cases.filter((item) => item.resolvedAt1).length,
+      regressionFree: options.cases.filter((item) => item.regressionFree).length,
+      elapsedMs: options.cases.reduce((total, item) => total + item.elapsedMs, 0),
+      usage: aggregateUsage(options.cases.map((item) => item.usage)),
+    },
+  };
+}
+
+export async function writeBenchmarkReport(
+  path: string,
+  report: BenchmarkRunReport,
+): Promise<void> {
+  await atomicWrite(path, `${redactSecrets(JSON.stringify(report, null, 2))}\n`);
 }
 
 export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult> {
+  if (Boolean(options.attempt) === Boolean(options.patch))
+    throw new HarnessError('exactly one of attempt or patch is required', 'invalid_attempt', 2);
   const task = getBenchmarkTask(options.taskId);
   const started = Date.now();
+  const startedAt = new Date(started).toISOString();
+  const runId = options.runId ?? `grade-${sha256(task.id + started).slice(0, 12)}`;
+  const usage = options.usage
+    ? parseUsageSummary(options.usage, 'benchmark.usage')
+    : notApplicableUsage();
+  const timeoutMs = options.maxCommandMs ?? 10_000;
   const root = await mkdtemp(join(process.env.TMPDIR ?? '/tmp', 'issue-harness-grade-'));
   const baseline = join(root, 'baseline');
   const candidate = join(root, 'candidate');
@@ -385,7 +488,7 @@ export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult
   const checks: CheckOutcome[] = [];
   try {
     for (const command of task.publicCommands)
-      checks.push(await runCheck('baseline', command, baseline, options.maxCommandMs ?? 10_000));
+      checks.push(await runCheck('baseline', command, baseline, timeoutMs));
     const baselineFailed = checks.some(
       (check) => check.phase === 'baseline' && check.status === 'failed',
     );
@@ -394,14 +497,14 @@ export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult
         if (check.phase === 'baseline' && check.status === 'passed')
           check.status = 'pre_existing_failure';
     for (const command of task.publicCommands)
-      checks.push(await runCheck('candidate', command, candidate, options.maxCommandMs ?? 10_000));
+      checks.push(await runCheck('candidate', command, candidate, timeoutMs));
     await cp(candidate, hidden, { recursive: true, force: true });
     for (const [path, content] of Object.entries(task.hiddenFiles)) {
       await mkdir(dirname(join(hidden, path)), { recursive: true, mode: 0o700 });
       await writeFile(join(hidden, path), content, 'utf8');
     }
     for (const command of task.hiddenCommands)
-      checks.push(await runCheck('hidden', command, hidden, options.maxCommandMs ?? 10_000));
+      checks.push(await runCheck('hidden', command, hidden, timeoutMs));
     const touched = await changedFiles(baseline, candidate);
     const forbiddenPathsTouched = touched.filter(
       (path) => !task.allowedPaths.some((pattern) => pathMatches(path, pattern)),
@@ -420,13 +523,14 @@ export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult
     const evidence: GradingEvidence = {
       schemaVersion: SCHEMA_VERSION,
       taskId: task.id,
-      runId: options.runId ?? `grade-${sha256(task.id + started).slice(0, 12)}`,
+      runId,
       resolvedAt1,
       regressionFree,
       patchScopeValid: forbiddenPathsTouched.length === 0,
       forbiddenPathsTouched,
       checks,
       elapsedMs: Date.now() - started,
+      usage,
       failureCategory: resolvedAt1
         ? undefined
         : failureCategory(checks, forbiddenPathsTouched, baselineKnownFailure),
@@ -434,6 +538,30 @@ export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult
         ? ['attempt changed files outside the benchmark allowlist']
         : [],
     };
+    const report = createBenchmarkRunReport({
+      runId,
+      mode: 'grader',
+      startedAt,
+      completedAt: nowIso(),
+      timeoutMs,
+      attemptPolicy: options.patch ? 'patch' : 'directory',
+      provider: options.provider,
+      seed: options.seed,
+      cases: [
+        {
+          caseId: task.id,
+          baseState: task.baseState,
+          language: task.language,
+          outcome: resolvedAt1 ? 'resolved' : 'failed',
+          resolvedAt1,
+          regressionFree,
+          elapsedMs: evidence.elapsedMs,
+          checkCount: checks.length,
+          failureCategory: evidence.failureCategory,
+          usage,
+        },
+      ],
+    });
     return {
       evidence,
       summary: {
@@ -443,6 +571,7 @@ export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult
         elapsedMs: evidence.elapsedMs,
         failureCategory: evidence.failureCategory,
       },
+      report,
     };
   } finally {
     await rm(root, { recursive: true, force: true });

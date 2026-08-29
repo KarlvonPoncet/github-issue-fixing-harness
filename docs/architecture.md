@@ -38,14 +38,17 @@ this document intentionally points to them rather than copying every field.
    tests and offline runs.
 6. **Tools and evidence.** The model can list files, inspect a file, make an
    exact hash-guarded replacement, run a named command, or signal `finish`.
-   Tool calls and results become typed run events. The worker collects a git
-   diff limited to configured paths and writes issue, patch, event-log, and
-   evidence artifacts, followed by a run manifest.
+   Tool calls, results, and one `model_usage` event per attempted model call
+   become typed run events. The worker collects a git diff limited to
+   configured paths and writes issue, patch, event-log, and evidence artifacts,
+   followed by a run manifest. Usage is also recorded in the evidence and
+   manifest; missing provider fields remain null.
 7. **Grading and reporting.** `bench grade` independently materializes a fresh
    baseline and candidate, runs baseline/candidate/hidden checks, validates
-   changed paths, and emits evidence. `task run` does **not** invoke this
-   grader. The CLI emits a compact terminal result, artifact IDs, and model
-   usage; non-resolved terminal outcomes return a non-zero status.
+   changed paths, and emits evidence plus a versioned per-case report. `task
+run` does **not** invoke this grader. The CLI emits a compact terminal
+   result, artifact IDs, model usage, and benchmark report; `--output` persists
+   the report as JSON. Non-resolved terminal outcomes return a non-zero status.
 
 The state machine's progression is bounded, but completion is not proof of a
 correct patch. In particular, the present `task run` evidence has an empty
@@ -53,9 +56,13 @@ checks list and derives its success booleans from the worker terminal outcome.
 That is a known correctness gap, not a guarantee.
 
 Each run carries a parsed `Budget` that caps state-machine steps, model calls,
-per-state retries, model-call time, model input/output, and patch size. The
-worker retries a failed state only within that run and records each retry as a
-warning event; it has no cross-run retry scheduler or backoff policy. Reaching
+per-state retries, model-call time, model input/output, and patch size. Usage
+accounting counts attempted calls, including retries and failures. It sums a
+token field only when every relevant response reports that field; otherwise the
+aggregate is null and its provenance is `partial` or `unavailable`. Costs are
+withheld unless pricing is explicitly trusted. The worker retries a failed
+state only within that run and records each retry as a warning event; it has no
+cross-run retry scheduler or backoff policy. Reaching
 the step or model-call cap produces a budget failure, a model-call timeout
 produces a timed-out outcome, and exhausting state retries produces a failed or
 timed-out outcome according to the failure category. The CLI's current `task
@@ -90,7 +97,9 @@ commands.
 JSON files are written through temporary files and renames. The index and queue
 have in-process write chains, schema checks, delivery-key deduplication, and
 leases. Artifacts are addressed by SHA-256 and each run has a typed record under
-`.harness/runs/`. The default local layout is documented in
+`.harness/runs/`. Finalized run manifests contain the aggregate usage summary;
+event logs preserve usage recorded before an interrupted run. Benchmark reports
+can likewise be persisted as redacted JSON. The default local layout is documented in
 [operations](usage.md#local-data-and-artifacts).
 
 Recovery is intentionally modest. `DurableQueue.recoverExpired()` requeues

@@ -11,6 +11,8 @@ import {
   rejectUnknown,
   SchemaError,
 } from './util.js';
+import { parseModelUsage } from './usage.js';
+import type { ModelUsage } from './usage.js';
 
 export interface ModelToolCall {
   id: string;
@@ -21,7 +23,17 @@ export interface ModelToolCall {
 export interface ModelResponse {
   text: string;
   toolCalls: ModelToolCall[];
-  usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
+  usage?: ModelUsage;
+}
+
+/** A provider may return useful usage even when the response itself fails. */
+export class ModelTransportError extends HarnessError {
+  constructor(message: string, code = 'model_error', usage?: ModelUsage) {
+    super(message, code);
+    this.usage = usage;
+  }
+
+  readonly usage?: ModelUsage;
 }
 
 export function parseReplayResponses(input: unknown): ModelResponse[] {
@@ -55,7 +67,13 @@ export function parseReplayResponses(input: unknown): ModelResponse[] {
         };
       },
     );
-    return { text: ensureString(record.text ?? '', `replay[${index}].text`), toolCalls: calls };
+    const response: ModelResponse = {
+      text: ensureString(record.text ?? '', `replay[${index}].text`),
+      toolCalls: calls,
+    };
+    if ('usage' in record && record.usage !== undefined)
+      response.usage = parseModelUsage(record.usage, `replay[${index}].usage`);
+    return response;
   });
 }
 
@@ -123,7 +141,15 @@ interface PiAssistant {
   content: PiBlock[];
   stopReason: string;
   errorMessage?: string;
-  usage: { input: number; output: number; cost: { total: number } };
+  usage?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    reasoning?: number;
+    totalTokens: number;
+    cost?: { total: number };
+  };
 }
 interface PiModelCollection {
   getModel(provider: string, model: string): unknown;
@@ -235,20 +261,27 @@ export class PiModelTransport implements ModelTransport {
       )
         toolCalls.push({ id: block.id, name: block.name, arguments: block.arguments });
     }
+    const usage = response.usage
+      ? parseModelUsage(
+          {
+            inputTokens: response.usage.input,
+            outputTokens: response.usage.output,
+            cachedInputTokens: response.usage.cacheRead,
+            cacheWriteTokens: response.usage.cacheWrite,
+            reasoningTokens: response.usage.reasoning,
+            totalTokens: response.usage.totalTokens,
+            costUsd: response.usage.cost?.total,
+          },
+          'provider.usage',
+        )
+      : undefined;
     if (response.stopReason === 'error' || response.stopReason === 'aborted')
-      throw new HarnessError(
+      throw new ModelTransportError(
         redactSecrets(response.errorMessage ?? 'model request failed'),
         'model_error',
+        usage,
       );
-    return {
-      text: redactSecrets(text),
-      toolCalls,
-      usage: {
-        inputTokens: response.usage.input,
-        outputTokens: response.usage.output,
-        costUsd: response.usage.cost.total,
-      },
-    };
+    return { text: redactSecrets(text), toolCalls, usage };
   }
 }
 

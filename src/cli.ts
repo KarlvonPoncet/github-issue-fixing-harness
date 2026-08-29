@@ -8,6 +8,8 @@ import { authStatus, credentialStorePathFromEnv, loginCodex, logout } from './au
 import { GitHubWebhookAdapter } from './github.js';
 import {
   gradeBenchmark,
+  writeBenchmarkReport,
+  createBenchmarkRunReport,
   describeBenchmarkTask,
   getBenchmarkTask,
   listBenchmarkTasks,
@@ -199,6 +201,7 @@ async function runTaskCommand(queue: DurableQueue, argv: string[]): Promise<numb
         forbiddenPathsTouched: [],
         checks: [],
         elapsedMs: Date.now() - started,
+        usage: result.usage,
         failureCategory: result.terminal.failureCategory,
         residualRisks: result.terminal.residualRisks,
       }),
@@ -253,15 +256,18 @@ async function benchmarkCommand(verb: string | undefined, argv: string[]): Promi
     return 0;
   }
   if (verb === 'run' || verb === 'replay' || verb === 'grade') {
-    const flags = flagsFor(argv, new Set(['--task', '--attempt', '--patch', '--run-id']));
+    const flags = flagsFor(
+      argv,
+      new Set(['--task', '--attempt', '--patch', '--run-id', '--output']),
+    );
     if (!flags.task)
       throw usage(
         '--task is required',
         `issue-harness bench ${verb} --task <id> --attempt <dir>|--patch <file>`,
       );
-    if (!flags.attempt && !flags.patch)
+    if (Boolean(flags.attempt) === Boolean(flags.patch))
       throw usage(
-        'one of --attempt or --patch is required',
+        'exactly one of --attempt or --patch is required',
         `issue-harness bench ${verb} --task ${flags.task} --attempt <dir>`,
       );
     const result = await gradeBenchmark({
@@ -270,26 +276,33 @@ async function benchmarkCommand(verb: string | undefined, argv: string[]): Promi
       patch: flags.patch,
       runId: flags['run-id'],
     });
-    emit({ summary: result.summary, evidence: result.evidence });
+    if (flags.output) await writeBenchmarkReport(flags.output, result.report);
+    emit({ summary: result.summary, evidence: result.evidence, report: result.report });
     return result.summary.resolvedAt1 ? 0 : 1;
   }
   if (verb === 'summary') {
-    const flags = flagsFor(argv, new Set(['--attempt-root', '--solutions']));
-    if (!flags['attempt-root'] && !flags.solutions)
+    const flags = flagsFor(argv, new Set(['--attempt-root', '--solutions', '--output']));
+    if (Boolean(flags['attempt-root']) === Boolean(flags.solutions))
       throw usage(
-        '--attempt-root or --solutions is required',
+        'exactly one of --attempt-root or --solutions is required',
         'issue-harness bench summary --solutions',
       );
     const temporary = flags.solutions
       ? await mkdtemp(join(process.env.TMPDIR ?? '/tmp', 'issue-harness-summary-'))
       : undefined;
     const attemptRoot = flags['attempt-root'] ?? temporary;
+    const summaryStarted = Date.now();
+    const summaryStartedAt = new Date(summaryStarted).toISOString();
+    const cases = [];
     try {
       const results = [];
       for (const task of listBenchmarkTasks()) {
         const attempt = join(attemptRoot ?? '', task.id);
         if (flags.solutions) await materializeBenchmarkTask(task.id, attempt, 'solution');
         const result = await gradeBenchmark({ taskId: task.id, attempt });
+        const caseReport = result.report.cases[0];
+        if (!caseReport) throw new HarnessError(`benchmark case missing: ${task.id}`, 'benchmark');
+        cases.push(caseReport);
         results.push({
           id: task.id,
           language: task.language,
@@ -297,13 +310,25 @@ async function benchmarkCommand(verb: string | undefined, argv: string[]): Promi
           regressionFree: result.summary.regressionFree,
           elapsedMs: result.summary.elapsedMs,
           failureCategory: result.summary.failureCategory,
+          usage: caseReport.usage,
         });
       }
+      const report = createBenchmarkRunReport({
+        runId: `summary-${sha256(`${flags.solutions ? 'reference_sanity' : 'grader'}:${summaryStarted}`).slice(0, 12)}`,
+        mode: flags.solutions ? 'reference_sanity' : 'grader',
+        startedAt: summaryStartedAt,
+        completedAt: nowIso(),
+        timeoutMs: 10_000,
+        attemptPolicy: 'directory',
+        cases,
+      });
+      if (flags.output) await writeBenchmarkReport(flags.output, report);
       emit({
         count: results.length,
         resolvedAt1: results.filter((result) => result.resolvedAt1).length,
         regressionFree: results.filter((result) => result.regressionFree).length,
         tasks: results,
+        report,
       });
       return results.every((result) => result.resolvedAt1) ? 0 : 1;
     } finally {
@@ -493,11 +518,20 @@ async function demoCommand(argv: string[]): Promise<number> {
   });
   const original = await readFile(join(workspaceRoot, 'src/math.ts'), 'utf8');
   const originalHash = sha256(original);
+  const usageFor = (call: number) => ({
+    inputTokens: call * 10,
+    outputTokens: 4,
+    cachedInputTokens: call,
+    cacheWriteTokens: 0,
+    reasoningTokens: 1,
+    totalTokens: call * 10 + 4,
+  });
   const transport = new FakeTransport((_request, call) => {
     if (call === 1)
       return {
         text: 'Inspecting source.',
         toolCalls: [{ id: '1', name: 'list_files', arguments: { path: 'src' } }],
+        usage: usageFor(call),
       };
     if (call === 2)
       return {
@@ -509,8 +543,10 @@ async function demoCommand(argv: string[]): Promise<number> {
             arguments: { name: 'public-test', command: ['node', '--test', 'test/public.mjs'] },
           },
         ],
+        usage: usageFor(call),
       };
-    if (call === 3) return { text: 'Planning a one-line correction.', toolCalls: [] };
+    if (call === 3)
+      return { text: 'Planning a one-line correction.', toolCalls: [], usage: usageFor(call) };
     if (call === 4)
       return {
         text: 'Editing exact file.',
@@ -525,6 +561,7 @@ async function demoCommand(argv: string[]): Promise<number> {
             },
           },
         ],
+        usage: usageFor(call),
       };
     if (call === 5)
       return {
@@ -536,10 +573,12 @@ async function demoCommand(argv: string[]): Promise<number> {
             arguments: { name: 'public-test', command: ['node', '--test', 'test/public.mjs'] },
           },
         ],
+        usage: usageFor(call),
       };
     return {
       text: 'Review complete.',
       toolCalls: [{ id: '6', name: 'finish', arguments: { reason: 'tests pass' } }],
+      usage: usageFor(call),
     };
   });
   const runner = new AgentRunner({
@@ -568,6 +607,9 @@ async function demoCommand(argv: string[]): Promise<number> {
     taskId: task.id,
     attempt: workspaceRoot,
     runId: run.manifest.runId,
+    usage: run.usage,
+    provider: run.manifest.provider,
+    seed: task.baseState,
   });
   const store = new ArtifactStore(join(root, 'artifacts'));
   await store.init();
@@ -579,7 +621,9 @@ async function demoCommand(argv: string[]): Promise<number> {
     demo: 'offline',
     queue: 'fixture → worker → edit → grade',
     terminal: run.terminal,
+    usage: run.usage,
     grading: grade.summary,
+    report: grade.report,
   });
   await rm(root, { recursive: true, force: true });
   return grade.summary.resolvedAt1 ? 0 : 1;
@@ -658,13 +702,13 @@ function help(args: string[]): number {
     'bench list': 'List the 10 frozen TypeScript/Python tasks. No flags.',
     'bench view': 'Inspect solver-facing task metadata. Required: --task <id>. Optional: --full.',
     'bench grade':
-      'Grade a candidate without model self-judgment. Required: --task <id> and one of --attempt <dir> or --patch <file>.',
+      'Grade a candidate without model self-judgment. Required: --task <id> and one of --attempt <dir> or --patch <file>. Optional: --output <file> for a durable JSON report.',
     'bench run':
-      'Alias for bench grade. Required: --task <id> and --attempt <dir> or --patch <file>.',
+      'Alias for bench grade. Required: --task <id> and --attempt <dir> or --patch <file>. Optional: --output <file>.',
     'bench replay':
-      'Alias for bench grade. Required: --task <id> and --attempt <dir> or --patch <file>.',
+      'Alias for bench grade. Required: --task <id> and --attempt <dir> or --patch <file>. Optional: --output <file>.',
     'bench summary':
-      'Grade all frozen solutions for a compact effectiveness baseline. Required: --solutions or --attempt-root <dir>.',
+      'Grade all frozen solutions for a compact effectiveness baseline. Required: --solutions or --attempt-root <dir>. Optional: --output <file> for a durable JSON report.',
     'webhook ingest':
       'Verify and enqueue a fixture webhook. Required: --file <json> --signature <sha256=...> --secret <secret>. Optional: --repository <owner/name> --base-commit <sha>.',
     'auth login':

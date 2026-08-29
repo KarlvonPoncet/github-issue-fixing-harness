@@ -108,11 +108,17 @@ The frozen benchmark has five TypeScript and five Python fixtures. The grader
 runs baseline public checks, candidate public checks, hidden checks, and
 allowed-path validation in fresh temporary directories. It reports
 `Resolved@1`-compatible success, regression-free status, timing, and failure
-categories. Reference-solution checks establish that the grader can recognize
-known solutions and classify expected baseline failures; they do not measure
-model effectiveness, production reliability, or generalization. Hidden checks
-are currently in the same checked-in benchmark implementation, so this is not
-held-out evaluation. See [Evaluation methodology](docs/evaluation.md).
+categories. `bench grade` and `bench summary` also emit a versioned report with
+one case record per fixture; `--output <file>` persists that report as JSON.
+The deterministic grader has no model calls, so its per-case token usage is
+explicitly `not_applicable` with null token totals rather than fabricated
+zeros. Model-run manifests and event logs retain provider-reported token
+breakdowns, including partial and missing usage. Reference-solution checks
+establish that the grader can recognize known solutions and classify expected
+baseline failures; they do not measure model effectiveness, production
+reliability, or generalization. Hidden checks are currently in the same
+checked-in benchmark implementation, so this is not held-out evaluation. See
+[Evaluation methodology](docs/evaluation.md).
 
 ## Contributing
 

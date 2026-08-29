@@ -5,14 +5,32 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { AgentRunner } from '../src/agent.js';
 import { FileCredentialStore, authStatus } from '../src/auth.js';
-import { FakeTransport, ReplayTransport, taskPrompt } from '../src/model.js';
-import { gradeBenchmark, listBenchmarkTasks, materializeBenchmarkTask } from '../src/benchmarks.js';
+import { main } from '../src/cli.js';
+import {
+  FakeTransport,
+  ModelTransportError,
+  ReplayTransport,
+  parseReplayResponses,
+  taskPrompt,
+} from '../src/model.js';
+import {
+  gradeBenchmark,
+  listBenchmarkTasks,
+  materializeBenchmarkTask,
+  writeBenchmarkReport,
+} from '../src/benchmarks.js';
 import { GitHubPollingAdapter, GitHubWebhookAdapter } from '../src/github.js';
 import { DurableQueue } from '../src/queue.js';
 import { ArtifactStore } from '../src/storage.js';
-import { parseNormalizedTask, SCHEMA_VERSION } from '../src/schema.js';
+import {
+  parseNormalizedTask,
+  parseRunEvent,
+  parseRunManifest,
+  SCHEMA_VERSION,
+} from '../src/schema.js';
 import { makeWorkspace } from '../src/workspace.js';
 import { nowIso, redactSecrets, sha256 } from '../src/util.js';
+import { summarizeUsage } from '../src/usage.js';
 
 function policy(repository: string) {
   return {
@@ -336,6 +354,139 @@ test('fake and replay transports have deterministic contracts', async () => {
   );
 });
 
+test('replay usage preserves provider fields and missing values are not fabricated', async () => {
+  const responses = parseReplayResponses([
+    {
+      text: 'partial',
+      toolCalls: [],
+      usage: { inputTokens: 11, outputTokens: 7, cachedInputTokens: 3, reasoningTokens: 2 },
+    },
+    { text: 'missing', toolCalls: [] },
+  ]);
+  assert.deepEqual(responses[0]?.usage, {
+    inputTokens: 11,
+    outputTokens: 7,
+    cachedInputTokens: 3,
+    reasoningTokens: 2,
+  });
+  assert.equal(responses[1]?.usage, undefined);
+  const partial = summarizeUsage([responses[0]?.usage, undefined], true);
+  assert.equal(partial.provenance, 'partial');
+  assert.equal(partial.inputTokens, null);
+  assert.equal(partial.totalTokens, null);
+  assert.equal(partial.costUsd, null);
+});
+
+test('agent accounting includes provider-error retries and survives manifest persistence', async () => {
+  const root = await mkdtemp('/tmp/issue-harness-usage-');
+  const workspace = await makeWorkspace(join(root, 'workspace'), {
+    allowedCommands: [],
+    allowedPaths: ['src/**'],
+    forbiddenPaths: [],
+  });
+  const usage = (base: number) => ({
+    inputTokens: base,
+    outputTokens: 2,
+    cachedInputTokens: 1,
+    cacheWriteTokens: 0,
+    reasoningTokens: 1,
+    totalTokens: base + 2,
+    costUsd: 0.01,
+  });
+  let calls = 0;
+  const result = await new AgentRunner({
+    task: task('usage-retry-task'),
+    workspace,
+    transport: new FakeTransport(() => {
+      calls += 1;
+      if (calls === 1) throw new ModelTransportError('provider failed', 'model_error', usage(10));
+      return { text: `step ${calls}`, toolCalls: [], usage: usage(calls * 10) };
+    }),
+    profile: { provider: 'openai', model: 'fake', auth: 'api_key', runtime: 'fake' },
+    budget: {
+      schemaVersion: SCHEMA_VERSION,
+      maxSteps: 10,
+      maxModelCalls: 8,
+      maxRetriesPerState: 1,
+      timeoutMs: 1000,
+      maxOutputChars: 1000,
+      maxPatchBytes: 1000,
+      maxInputChars: 1000,
+    },
+  }).run();
+  assert.equal(result.terminal.outcome, 'resolved');
+  assert.equal(result.usage.modelCalls, 7);
+  assert.equal(result.usage.reportedCalls, 7);
+  assert.equal(result.usage.missingCalls, 0);
+  assert.equal(result.usage.partialCalls, 0);
+  assert.equal(result.usage.inputTokens, 10 + 20 + 30 + 40 + 50 + 60 + 70);
+  assert.equal(result.usage.outputTokens, 14);
+  assert.equal(result.usage.cachedInputTokens, 7);
+  assert.equal(result.usage.reasoningTokens, 7);
+  assert.equal(
+    result.usage.totalTokens,
+    10 + 2 + (20 + 2) + (30 + 2) + (40 + 2) + (50 + 2) + (60 + 2) + (70 + 2),
+  );
+  assert.equal(result.usage.costUsd, null);
+  assert.equal(result.usage.costProvenance, 'not_configured');
+  const usageEvents = result.events.filter((event) => event.type === 'model_usage');
+  assert.equal(usageEvents.length, 7);
+  for (const event of usageEvents) assert.deepEqual(parseRunEvent(event), event);
+  assert.deepEqual(parseRunManifest(result.manifest).usage, result.usage);
+
+  const store = new ArtifactStore(join(root, 'artifacts'));
+  await store.init();
+  await store.index.upsertRun(result.manifest);
+  const reopened = new ArtifactStore(join(root, 'artifacts'));
+  await reopened.init();
+  assert.deepEqual((await reopened.index.getRun(result.manifest.runId))?.usage, result.usage);
+  const interrupted = {
+    ...result.manifest,
+    status: 'running' as const,
+    updatedAt: '2000-01-01T00:00:00.000Z',
+  };
+  await reopened.index.upsertRun(interrupted);
+  const recovered = await reopened.index.recoverInterrupted(Date.parse('2025-01-01T00:00:00.000Z'));
+  assert.equal(recovered[0]?.status, 'queued');
+  assert.deepEqual(recovered[0]?.usage, result.usage);
+});
+
+test('failed model calls are accounted as missing rather than zero tokens', async () => {
+  const root = await mkdtemp('/tmp/issue-harness-usage-failure-');
+  const workspace = await makeWorkspace(root, {
+    allowedCommands: [],
+    allowedPaths: ['src/**'],
+    forbiddenPaths: [],
+  });
+  const result = await new AgentRunner({
+    task: task('usage-failure-task'),
+    workspace,
+    transport: new FakeTransport(() => {
+      throw new Error('provider unavailable');
+    }),
+    profile: { provider: 'openai', model: 'fake', auth: 'api_key', runtime: 'fake' },
+    budget: {
+      schemaVersion: SCHEMA_VERSION,
+      maxSteps: 2,
+      maxModelCalls: 2,
+      maxRetriesPerState: 0,
+      timeoutMs: 1000,
+      maxOutputChars: 1000,
+      maxPatchBytes: 1000,
+      maxInputChars: 1000,
+    },
+  }).run();
+  assert.equal(result.terminal.outcome, 'failed');
+  assert.equal(result.usage.modelCalls, 1);
+  assert.equal(result.usage.reportedCalls, 0);
+  assert.equal(result.usage.missingCalls, 1);
+  assert.equal(result.usage.provenance, 'unavailable');
+  assert.equal(result.usage.inputTokens, null);
+  assert.equal(result.usage.outputTokens, null);
+  assert.equal(result.usage.totalTokens, null);
+  assert.equal(result.usage.costUsd, null);
+});
+
 test('agent transitions through every bounded state with a fake transport', async () => {
   const root = await mkdtemp('/tmp/issue-harness-agent-');
   const workspace = await makeWorkspace(root, {
@@ -431,6 +582,82 @@ test('all ten benchmark tasks grade deterministically and baseline is known fail
       ),
     );
   }
+});
+
+test('benchmark reports persist per-case usage and explicit grader provenance', async () => {
+  const root = await mkdtemp('/tmp/issue-harness-benchmark-report-');
+  const attempt = join(root, 'attempt');
+  await materializeBenchmarkTask('ts-addition', attempt, 'base');
+  const failed = await gradeBenchmark({ taskId: 'ts-addition', attempt });
+  assert.equal(failed.summary.resolvedAt1, false);
+  assert.equal(failed.report.cases.length, 1);
+  assert.equal(failed.report.cases[0]?.usage.provenance, 'not_applicable');
+  assert.equal(failed.report.cases[0]?.usage.inputTokens, null);
+  assert.equal(failed.report.aggregate.usage.provenance, 'not_applicable');
+  assert.equal(failed.evidence.usage.costUsd, null);
+
+  const suppliedUsage = summarizeUsage(
+    [
+      {
+        inputTokens: 5,
+        outputTokens: 3,
+        cachedInputTokens: 1,
+        cacheWriteTokens: 0,
+        reasoningTokens: 1,
+        totalTokens: 8,
+        costUsd: 0.02,
+      },
+    ],
+    true,
+  );
+  const withUsage = await gradeBenchmark({
+    taskId: 'ts-addition',
+    attempt,
+    usage: suppliedUsage,
+    provider: { provider: 'openai', model: 'fake', auth: 'api_key', runtime: 'fake' },
+    seed: 'fixture-seed',
+  });
+  assert.equal(withUsage.report.cases[0]?.usage.provenance, 'complete');
+  assert.equal(withUsage.report.cases[0]?.usage.inputTokens, 5);
+  assert.equal(withUsage.report.cases[0]?.usage.totalTokens, 8);
+  assert.equal(withUsage.report.cases[0]?.usage.costUsd, 0.02);
+  assert.equal(withUsage.report.configuration.provider?.model, 'fake');
+  assert.equal(withUsage.report.configuration.seed, 'fixture-seed');
+
+  const reportPath = join(root, 'reports', 'benchmark.json');
+  await writeBenchmarkReport(reportPath, failed.report);
+  const persisted = JSON.parse(await readFile(reportPath, 'utf8')) as typeof failed.report;
+  assert.equal(persisted.benchmarkVersion, 'frozen-v1');
+  assert.equal(persisted.evaluatorVersion, 'local-deterministic-v1');
+  assert.equal(persisted.cases[0]?.caseId, 'ts-addition');
+  assert.equal(persisted.cases[0]?.usage.provenance, 'not_applicable');
+  assert.equal(persisted.cases[0]?.usage.totalTokens, null);
+  assert.equal(persisted.configuration.provider, null);
+  assert.equal(persisted.configuration.attemptPolicy, 'directory');
+});
+
+test('benchmark grading requires exactly one attempt source', async () => {
+  await assert.rejects(
+    () => gradeBenchmark({ taskId: 'ts-addition' }),
+    /exactly one of attempt or patch is required/,
+  );
+  await assert.rejects(
+    () =>
+      gradeBenchmark({
+        taskId: 'ts-addition',
+        attempt: '/unused/attempt',
+        patch: '/unused/patch',
+      }),
+    /exactly one of attempt or patch is required/,
+  );
+});
+
+test('benchmark summary requires exactly one attempt source', async () => {
+  assert.equal(await main(['bench', 'summary']), 2);
+  assert.equal(
+    await main(['bench', 'summary', '--solutions', '--attempt-root', '/unused/attempts']),
+    2,
+  );
 });
 
 test('all benchmark public tests run without making test inputs editable', async () => {
