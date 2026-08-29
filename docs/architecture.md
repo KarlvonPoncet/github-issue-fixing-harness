@@ -97,9 +97,9 @@ commands.
 JSON files are written through temporary files and renames. The index and queue
 have in-process write chains, schema checks, delivery-key deduplication, and
 leases. Artifacts are addressed by SHA-256 and each run has a typed record under
-`.harness/runs/`; run manifests and event logs retain usage accounting through
-restarts and interrupted-run recovery. Benchmark reports can likewise be
-persisted as redacted JSON. The default local layout is documented in
+`.harness/runs/`. Finalized run manifests contain the aggregate usage summary;
+event logs preserve usage recorded before an interrupted run. Benchmark reports
+can likewise be persisted as redacted JSON. The default local layout is documented in
 [operations](usage.md#local-data-and-artifacts).
 
 Recovery is intentionally modest. `DurableQueue.recoverExpired()` requeues

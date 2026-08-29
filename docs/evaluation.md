@@ -64,11 +64,12 @@ check commands, statuses, and redacted output.
 
 The deterministic grader does not invoke a model. Its every-case usage record
 therefore has `provenance: not_applicable` and null token totals; null means
-that a value was not reported, never zero usage. When a model run is associated
-with a grade through the library API, one usage sample is retained per model
-call, including retries and provider failures that carry usage. Input, output,
-cached-input, cache-write, reasoning, and total token fields are summed only
-when present for every relevant call; otherwise the aggregate field is null.
+that a value was not reported, never zero usage. Model-run event logs retain one
+usage sample per attempted call, including retries and provider failures that
+carry usage. A run's usage summary can be associated with a grade through the
+library API. Input, output, cached-input, cache-write, reasoning, and total
+token fields are summed only when present for every relevant call; otherwise
+the aggregate field is null.
 `missingCalls`, `partialCalls`, and `provenance` make incomplete accounting
 explicit. Costs stay null unless pricing is explicitly marked configured and
 trusted; `costProvenance` records that decision. No secret, credential, or

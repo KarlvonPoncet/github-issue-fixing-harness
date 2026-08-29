@@ -14,6 +14,8 @@ import { HarnessError, atomicWrite, nowIso, redactSecrets, sha256, withTimeout }
 
 const execFileAsync = promisify(execFile);
 
+export const EVALUATOR_VERSION = 'local-deterministic-v1' as const;
+
 export interface BenchmarkTaskView {
   id: string;
   language: 'typescript' | 'python';
@@ -389,6 +391,7 @@ export interface BenchmarkRunReport {
   schemaVersion: typeof SCHEMA_VERSION;
   runId: string;
   benchmarkVersion: typeof BENCHMARK_VERSION;
+  evaluatorVersion: typeof EVALUATOR_VERSION;
   mode: 'grader' | 'reference_sanity';
   startedAt: string;
   completedAt: string;
@@ -435,6 +438,7 @@ export function createBenchmarkRunReport(options: {
     schemaVersion: SCHEMA_VERSION,
     runId: options.runId,
     benchmarkVersion: BENCHMARK_VERSION,
+    evaluatorVersion: EVALUATOR_VERSION,
     mode: options.mode,
     startedAt: options.startedAt,
     completedAt: options.completedAt,
@@ -464,11 +468,7 @@ export async function writeBenchmarkReport(
 
 export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult> {
   if (Boolean(options.attempt) === Boolean(options.patch))
-    throw new HarnessError(
-      'exactly one of attempt or patch is required',
-      'invalid_attempt',
-      2,
-    );
+    throw new HarnessError('exactly one of attempt or patch is required', 'invalid_attempt', 2);
   const task = getBenchmarkTask(options.taskId);
   const started = Date.now();
   const startedAt = new Date(started).toISOString();

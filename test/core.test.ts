@@ -628,6 +628,7 @@ test('benchmark reports persist per-case usage and explicit grader provenance', 
   await writeBenchmarkReport(reportPath, failed.report);
   const persisted = JSON.parse(await readFile(reportPath, 'utf8')) as typeof failed.report;
   assert.equal(persisted.benchmarkVersion, 'frozen-v1');
+  assert.equal(persisted.evaluatorVersion, 'local-deterministic-v1');
   assert.equal(persisted.cases[0]?.caseId, 'ts-addition');
   assert.equal(persisted.cases[0]?.usage.provenance, 'not_applicable');
   assert.equal(persisted.cases[0]?.usage.totalTokens, null);
