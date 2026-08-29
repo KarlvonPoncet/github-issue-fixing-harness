@@ -265,9 +265,9 @@ async function benchmarkCommand(verb: string | undefined, argv: string[]): Promi
         '--task is required',
         `issue-harness bench ${verb} --task <id> --attempt <dir>|--patch <file>`,
       );
-    if (!flags.attempt && !flags.patch)
+    if (Boolean(flags.attempt) === Boolean(flags.patch))
       throw usage(
-        'one of --attempt or --patch is required',
+        'exactly one of --attempt or --patch is required',
         `issue-harness bench ${verb} --task ${flags.task} --attempt <dir>`,
       );
     const result = await gradeBenchmark({

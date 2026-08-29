@@ -463,6 +463,12 @@ export async function writeBenchmarkReport(
 }
 
 export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult> {
+  if (Boolean(options.attempt) === Boolean(options.patch))
+    throw new HarnessError(
+      'exactly one of attempt or patch is required',
+      'invalid_attempt',
+      2,
+    );
   const task = getBenchmarkTask(options.taskId);
   const started = Date.now();
   const startedAt = new Date(started).toISOString();

@@ -634,6 +634,22 @@ test('benchmark reports persist per-case usage and explicit grader provenance', 
   assert.equal(persisted.configuration.attemptPolicy, 'directory');
 });
 
+test('benchmark grading requires exactly one attempt source', async () => {
+  await assert.rejects(
+    () => gradeBenchmark({ taskId: 'ts-addition' }),
+    /exactly one of attempt or patch is required/,
+  );
+  await assert.rejects(
+    () =>
+      gradeBenchmark({
+        taskId: 'ts-addition',
+        attempt: '/unused/attempt',
+        patch: '/unused/patch',
+      }),
+    /exactly one of attempt or patch is required/,
+  );
+});
+
 test('all benchmark public tests run without making test inputs editable', async () => {
   const root = await mkdtemp('/tmp/issue-harness-public-inputs-');
   for (const taskView of listBenchmarkTasks()) {
