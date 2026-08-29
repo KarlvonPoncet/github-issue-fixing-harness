@@ -928,11 +928,7 @@ async function runCheck(
     signal: controller.signal,
   });
   try {
-    const result = await withTimeout(
-      child,
-      timeoutMs,
-      `${phase} check`,
-    );
+    const result = await withTimeout(child, timeoutMs, `${phase} check`);
     return {
       name: `${phase}:${command}`,
       command,
