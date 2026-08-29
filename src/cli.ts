@@ -282,9 +282,9 @@ async function benchmarkCommand(verb: string | undefined, argv: string[]): Promi
   }
   if (verb === 'summary') {
     const flags = flagsFor(argv, new Set(['--attempt-root', '--solutions', '--output']));
-    if (!flags['attempt-root'] && !flags.solutions)
+    if (Boolean(flags['attempt-root']) === Boolean(flags.solutions))
       throw usage(
-        '--attempt-root or --solutions is required',
+        'exactly one of --attempt-root or --solutions is required',
         'issue-harness bench summary --solutions',
       );
     const temporary = flags.solutions

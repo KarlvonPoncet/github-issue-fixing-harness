@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { AgentRunner } from '../src/agent.js';
 import { FileCredentialStore, authStatus } from '../src/auth.js';
+import { main } from '../src/cli.js';
 import {
   FakeTransport,
   ModelTransportError,
@@ -647,6 +648,14 @@ test('benchmark grading requires exactly one attempt source', async () => {
         patch: '/unused/patch',
       }),
     /exactly one of attempt or patch is required/,
+  );
+});
+
+test('benchmark summary requires exactly one attempt source', async () => {
+  assert.equal(await main(['bench', 'summary']), 2);
+  assert.equal(
+    await main(['bench', 'summary', '--solutions', '--attempt-root', '/unused/attempts']),
+    2,
   );
 });
 
