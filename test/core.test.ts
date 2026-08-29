@@ -14,6 +14,9 @@ import {
   taskPrompt,
 } from '../src/model.js';
 import {
+  BENCHMARK_VERSION,
+  EVALUATOR_VERSION,
+  createBenchmarkRunReport,
   gradeBenchmark,
   listBenchmarkTasks,
   materializeBenchmarkTask,
@@ -46,6 +49,20 @@ function policy(repository: string) {
     maxCommandMs: 2_000,
     requireHumanReviewFor: ['security_sensitive', 'destructive', 'oversized', 'ambiguous'] as const,
   };
+}
+
+async function captureStdout<T>(fn: () => Promise<T>): Promise<{ result: T; output: string }> {
+  const originalWrite = process.stdout.write;
+  let output = '';
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    output += chunk.toString();
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    return { result: await fn(), output };
+  } finally {
+    process.stdout.write = originalWrite;
+  }
 }
 
 function task(id: string, repository = 'acme/repo') {
@@ -566,7 +583,59 @@ test('agent cancellation and budgets produce explicit terminal reasons', async (
   assert.equal(cancelled.terminal.outcome, 'cancelled');
 });
 
-test('all ten benchmark tasks grade deterministically and baseline is known failing', async () => {
+test('benchmark discovery exposes stable seeds across both local languages', () => {
+  const views = listBenchmarkTasks();
+  assert.equal(views.length, 20);
+  assert.equal(new Set(views.map((view) => view.id)).size, views.length);
+  assert.deepEqual(new Set(views.map((view) => view.language)), new Set(['typescript', 'python']));
+  for (const view of views) {
+    assert.equal(view.seed, view.baseState, view.id);
+    assert.ok(view.issue.length > 20, view.id);
+    assert.ok(view.publicCommands.length >= 1, view.id);
+    assert.ok(
+      view.publicCommands.every(
+        (command) => command.startsWith('node ') || command.startsWith('python3 '),
+      ),
+      view.id,
+    );
+  }
+});
+
+test('fixture manifest mirrors the frozen solver-facing corpus and file hashes', async () => {
+  const manifest = JSON.parse(await readFile('fixtures/manifest.json', 'utf8')) as {
+    tasks: Array<{
+      id: string;
+      language: string;
+      baseState: string;
+      seed: string;
+      publicCommands: string[];
+      allowedPaths: string[];
+      files: Record<string, string>;
+    }>;
+  };
+  const views = listBenchmarkTasks();
+  assert.equal(manifest.tasks.length, views.length);
+  const root = await mkdtemp('/tmp/issue-harness-manifest-');
+  for (const entry of manifest.tasks) {
+    const view = views.find((candidate) => candidate.id === entry.id);
+    assert.ok(view, entry.id);
+    assert.equal(view.language, entry.language);
+    assert.equal(view.baseState, entry.baseState);
+    assert.equal(view.seed, entry.seed);
+    assert.deepEqual(view.publicCommands, entry.publicCommands);
+    assert.deepEqual(view.allowedPaths, entry.allowedPaths);
+    const fixture = join(root, entry.id);
+    await materializeBenchmarkTask(entry.id, fixture, 'base');
+    for (const [path, expectedHash] of Object.entries(entry.files))
+      assert.equal(
+        sha256(await readFile(join(fixture, path))),
+        expectedHash,
+        `${entry.id}:${path}`,
+      );
+  }
+});
+
+test('all twenty benchmark tasks grade deterministically and baseline is known failing', async () => {
   const root = await mkdtemp('/tmp/issue-harness-bench-');
   for (const taskView of listBenchmarkTasks()) {
     const attempt = join(root, taskView.id);
@@ -575,13 +644,51 @@ test('all ten benchmark tasks grade deterministically and baseline is known fail
     const second = await gradeBenchmark({ taskId: taskView.id, attempt });
     assert.equal(first.summary.resolvedAt1, true, taskView.id);
     assert.equal(first.summary.regressionFree, true, taskView.id);
+    assert.equal(first.report.configuration.seed, taskView.seed, taskView.id);
     assert.equal(second.summary.resolvedAt1, first.summary.resolvedAt1);
+    assert.equal(second.evidence.checks.length, first.evidence.checks.length);
     assert.ok(
       first.evidence.checks.some(
         (check) => check.phase === 'baseline' && check.status === 'failed',
       ),
     );
   }
+});
+
+test('CLI benchmark discovery and summary expose the expanded report', async () => {
+  const listed = await captureStdout(() => main(['bench', 'list']));
+  assert.equal(listed.result, 0);
+  assert.match(listed.output, /count: 20/);
+  assert.match(listed.output, /seed: frozen-ts-csv-quoted-1/);
+
+  const root = await mkdtemp('/tmp/issue-harness-benchmark-cli-');
+  const reportPath = join(root, 'reports', 'summary.json');
+  const captured = await captureStdout(() =>
+    main(['bench', 'summary', '--solutions', '--output', reportPath]),
+  );
+  assert.equal(captured.result, 0);
+  assert.match(captured.output, /count: 20/);
+  assert.match(captured.output, /resolvedAt1: 20/);
+  const report = JSON.parse(await readFile(reportPath, 'utf8')) as {
+    benchmarkVersion: string;
+    evaluatorVersion: string;
+    cases: Array<{ caseId: string; usage: { provenance: string; totalTokens: number | null } }>;
+    aggregate: {
+      caseCount: number;
+      resolvedAt1: number;
+      regressionFree: number;
+      usage: { provenance: string };
+    };
+  };
+  assert.equal(report.benchmarkVersion, BENCHMARK_VERSION);
+  assert.equal(report.evaluatorVersion, EVALUATOR_VERSION);
+  assert.equal(report.cases.length, 20);
+  assert.equal(report.aggregate.caseCount, 20);
+  assert.equal(report.aggregate.resolvedAt1, 20);
+  assert.equal(report.aggregate.regressionFree, 20);
+  assert.equal(report.aggregate.usage.provenance, 'not_applicable');
+  assert.ok(report.cases.every((item) => item.usage.provenance === 'not_applicable'));
+  assert.ok(report.cases.every((item) => item.usage.totalTokens === null));
 });
 
 test('benchmark reports persist per-case usage and explicit grader provenance', async () => {
@@ -594,6 +701,7 @@ test('benchmark reports persist per-case usage and explicit grader provenance', 
   assert.equal(failed.report.cases[0]?.usage.provenance, 'not_applicable');
   assert.equal(failed.report.cases[0]?.usage.inputTokens, null);
   assert.equal(failed.report.aggregate.usage.provenance, 'not_applicable');
+  assert.equal(failed.report.configuration.seed, 'frozen-ts-addition-1');
   assert.equal(failed.evidence.usage.costUsd, null);
 
   const suppliedUsage = summarizeUsage(
@@ -627,13 +735,102 @@ test('benchmark reports persist per-case usage and explicit grader provenance', 
   const reportPath = join(root, 'reports', 'benchmark.json');
   await writeBenchmarkReport(reportPath, failed.report);
   const persisted = JSON.parse(await readFile(reportPath, 'utf8')) as typeof failed.report;
-  assert.equal(persisted.benchmarkVersion, 'frozen-v1');
-  assert.equal(persisted.evaluatorVersion, 'local-deterministic-v1');
+  assert.equal(persisted.benchmarkVersion, BENCHMARK_VERSION);
+  assert.equal(persisted.evaluatorVersion, EVALUATOR_VERSION);
   assert.equal(persisted.cases[0]?.caseId, 'ts-addition');
   assert.equal(persisted.cases[0]?.usage.provenance, 'not_applicable');
   assert.equal(persisted.cases[0]?.usage.totalTokens, null);
   assert.equal(persisted.configuration.provider, null);
   assert.equal(persisted.configuration.attemptPolicy, 'directory');
+
+  const partialUsage = summarizeUsage([{ inputTokens: 9 }]);
+  const aggregate = createBenchmarkRunReport({
+    runId: 'aggregate-fixture',
+    mode: 'grader',
+    startedAt: '2025-01-01T00:00:00.000Z',
+    completedAt: '2025-01-01T00:00:01.000Z',
+    timeoutMs: 10_000,
+    attemptPolicy: 'directory',
+    cases: [
+      { ...failed.report.cases[0]!, caseId: 'complete', usage: suppliedUsage },
+      { ...failed.report.cases[0]!, caseId: 'partial', usage: partialUsage },
+    ],
+  });
+  assert.equal(aggregate.aggregate.usage.modelCalls, 2);
+  assert.equal(aggregate.aggregate.usage.provenance, 'partial');
+  assert.equal(aggregate.aggregate.usage.inputTokens, 14);
+  assert.equal(aggregate.aggregate.usage.totalTokens, null);
+});
+
+test('benchmark catches incomplete fixes, regressions, scope violations, and patch errors', async () => {
+  const root = await mkdtemp('/tmp/issue-harness-benchmark-failures-');
+
+  const incomplete = join(root, 'incomplete');
+  await materializeBenchmarkTask('ts-retry', incomplete, 'solution');
+  await writeFile(
+    join(incomplete, 'src/retry.ts'),
+    'export function retry<T>(operation: () => T, attempts: number): T { let last: unknown; for (let i = 0; i < attempts; i += 1) { try { return operation(); } catch (error) { last = error; } } throw last instanceof Error ? last : new Error("operation failed"); }\n',
+    'utf8',
+  );
+  const incompleteResult = await gradeBenchmark({ taskId: 'ts-retry', attempt: incomplete });
+  assert.equal(incompleteResult.summary.resolvedAt1, false);
+  assert.equal(incompleteResult.summary.regressionFree, true);
+  assert.equal(incompleteResult.summary.failureCategory, 'hidden_check_failed');
+  assert.ok(
+    incompleteResult.evidence.checks.some(
+      (check) => check.phase === 'hidden' && check.status === 'failed',
+    ),
+  );
+
+  const regression = join(root, 'regression');
+  await materializeBenchmarkTask('ts-csv-quoted', regression, 'solution');
+  await writeFile(
+    join(regression, 'src/csv.ts'),
+    'export function parseCsvLine(line: string): string[] { if (line.startsWith("\\\"")) return ["Ada,42", "active"]; return line.split(",").filter(Boolean); }\n',
+    'utf8',
+  );
+  const regressionResult = await gradeBenchmark({ taskId: 'ts-csv-quoted', attempt: regression });
+  assert.equal(regressionResult.summary.resolvedAt1, false);
+  assert.equal(regressionResult.summary.regressionFree, false);
+  assert.equal(regressionResult.summary.failureCategory, 'candidate_check_failed');
+  assert.ok(
+    regressionResult.evidence.checks.some(
+      (check) => check.phase === 'candidate' && check.status === 'failed',
+    ),
+  );
+
+  const scope = join(root, 'scope');
+  await materializeBenchmarkTask('py-median', scope, 'solution');
+  await writeFile(join(scope, 'notes.txt'), 'unexpected artifact\n', 'utf8');
+  const scopeResult = await gradeBenchmark({ taskId: 'py-median', attempt: scope });
+  assert.equal(scopeResult.summary.resolvedAt1, false);
+  assert.equal(scopeResult.summary.regressionFree, true);
+  assert.equal(scopeResult.summary.failureCategory, 'patch_scope');
+  assert.deepEqual(scopeResult.evidence.forbiddenPathsTouched, ['notes.txt']);
+
+  const noOpPatch = join(root, 'noop.diff');
+  await writeFile(noOpPatch, '', 'utf8');
+  const noOpResult = await gradeBenchmark({ taskId: 'ts-addition', patch: noOpPatch });
+  assert.equal(noOpResult.summary.resolvedAt1, false);
+  assert.equal(noOpResult.summary.failureCategory, 'candidate_check_failed');
+
+  const malformedPatch = join(root, 'malformed.diff');
+  await writeFile(malformedPatch, 'not a unified diff\n', 'utf8');
+  await assert.rejects(
+    () => gradeBenchmark({ taskId: 'ts-addition', patch: malformedPatch }),
+    /could not apply supplied patch/,
+  );
+});
+
+test('benchmark records command timeouts as failed checks without claiming a fix', async () => {
+  const root = await mkdtemp('/tmp/issue-harness-benchmark-timeout-');
+  const attempt = join(root, 'attempt');
+  await materializeBenchmarkTask('ts-addition', attempt, 'solution');
+  const result = await gradeBenchmark({ taskId: 'ts-addition', attempt, maxCommandMs: 1 });
+  assert.equal(result.summary.resolvedAt1, false);
+  assert.equal(result.summary.regressionFree, false);
+  assert.ok(result.evidence.checks.some((check) => check.status === 'failed'));
+  assert.ok(result.evidence.checks.some((check) => /timed out|spawn|ERR_/.test(check.output)));
 });
 
 test('benchmark grading requires exactly one attempt source', async () => {

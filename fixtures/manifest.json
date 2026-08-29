@@ -7,6 +7,7 @@
       "title": "Correct addition",
       "issue": "The add helper returns the wrong result for ordinary integer inputs.",
       "baseState": "frozen-ts-addition-1",
+      "seed": "frozen-ts-addition-1",
       "publicCommands": [
         "node --test test/public.mjs"
       ],
@@ -25,6 +26,7 @@
       "title": "Reject negative values",
       "issue": "parsePositive must reject zero and negative values instead of returning them.",
       "baseState": "frozen-ts-positive-1",
+      "seed": "frozen-ts-positive-1",
       "publicCommands": [
         "node --test test/public.mjs"
       ],
@@ -43,6 +45,7 @@
       "title": "Format contact",
       "issue": "formatContact should include the email in angle brackets when one is present.",
       "baseState": "frozen-ts-format-email-1",
+      "seed": "frozen-ts-format-email-1",
       "publicCommands": [
         "node --test test/public.mjs"
       ],
@@ -61,6 +64,7 @@
       "title": "Stable unique values",
       "issue": "uniqueValues should remove duplicates while preserving the first-seen order.",
       "baseState": "frozen-ts-unique-1",
+      "seed": "frozen-ts-unique-1",
       "publicCommands": [
         "node --test test/public.mjs"
       ],
@@ -79,6 +83,7 @@
       "title": "Preserve zero configuration",
       "issue": "readLimit must preserve an explicitly configured zero and only use the default when the value is absent.",
       "baseState": "frozen-ts-config-zero-1",
+      "seed": "frozen-ts-config-zero-1",
       "publicCommands": [
         "node --test test/public.mjs"
       ],
@@ -97,6 +102,7 @@
       "title": "Correct Python addition",
       "issue": "The Python add helper subtracts instead of adding.",
       "baseState": "frozen-py-addition-1",
+      "seed": "frozen-py-addition-1",
       "publicCommands": [
         "python3 -m unittest test_public.py"
       ],
@@ -115,6 +121,7 @@
       "title": "Validate positive Python input",
       "issue": "parse_positive must reject zero and negative integers.",
       "baseState": "frozen-py-positive-1",
+      "seed": "frozen-py-positive-1",
       "publicCommands": [
         "python3 -m unittest test_public.py"
       ],
@@ -133,6 +140,7 @@
       "title": "Format Python contact",
       "issue": "format_contact should include an optional email address.",
       "baseState": "frozen-py-format-email-1",
+      "seed": "frozen-py-format-email-1",
       "publicCommands": [
         "python3 -m unittest test_public.py"
       ],
@@ -151,6 +159,7 @@
       "title": "Stable Python uniqueness",
       "issue": "unique_values should remove duplicate entries without sorting them.",
       "baseState": "frozen-py-unique-1",
+      "seed": "frozen-py-unique-1",
       "publicCommands": [
         "python3 -m unittest test_public.py"
       ],
@@ -169,6 +178,7 @@
       "title": "Preserve Python zero configuration",
       "issue": "read_limit must preserve zero rather than treating it as missing.",
       "baseState": "frozen-py-config-zero-1",
+      "seed": "frozen-py-config-zero-1",
       "publicCommands": [
         "python3 -m unittest test_public.py"
       ],
@@ -179,6 +189,198 @@
         "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "src/app.py": "42ed1044cca753bf243fc07a1e597612a2e6d7b3963b88699197e801c8d175df",
         "test_public.py": "a146aa22af9258f2ca7719342162009bfc88337deefc28d4dce9c7364afbe6ee"
+      }
+    },
+    {
+      "id": "ts-csv-quoted",
+      "language": "typescript",
+      "title": "Parse quoted CSV fields",
+      "issue": "parseCsvLine must keep commas inside quoted fields and decode escaped quotes.",
+      "baseState": "frozen-ts-csv-quoted-1",
+      "seed": "frozen-ts-csv-quoted-1",
+      "publicCommands": [
+        "node --test test/public.mjs",
+        "node --test test/regression.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/csv.ts": "cba40bd13e9edea369e5f596300cc4b3d9d4e8b9f79bd4f3f297b63ac84f6fee",
+        "src/index.ts": "3d9b64fa5938d3f166b829fe1a4ba3faf5f44de04a87111e840a187b4bc2ce60",
+        "test/public.mjs": "3847871294cd44923d7a872fe9a0a37f5f59e876bb6fe3d7b74165ea1e598049",
+        "test/regression.mjs": "cd81036e0a901e4f6338fc6c2de1ff9f906809f1f5b2624e0ef664263faa263b"
+      }
+    },
+    {
+      "id": "ts-retry",
+      "language": "typescript",
+      "title": "Retry a failing operation",
+      "issue": "retry must make at most the requested attempts and reject invalid attempt counts.",
+      "baseState": "frozen-ts-retry-1",
+      "seed": "frozen-ts-retry-1",
+      "publicCommands": [
+        "node --test test/public.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/index.ts": "280fc3befb2e4e7add58c73ac0e8e5e5204d6343ddd986285be1fa8a924cdc23",
+        "src/retry.ts": "93f76754fd0791800199339532c9095cb4449f84cc1ba0bf346966420ca8eecf",
+        "test/public.mjs": "31e6c7410356dc8896c05df541bba1a26defaffed39e749c6eef6971bb676b26"
+      }
+    },
+    {
+      "id": "ts-summarize-sales",
+      "language": "typescript",
+      "title": "Summarize valid sales",
+      "issue": "summarizeSales must ignore records whose amount is not a finite number.",
+      "baseState": "frozen-ts-summarize-sales-1",
+      "seed": "frozen-ts-summarize-sales-1",
+      "publicCommands": [
+        "node --test test/public.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/index.ts": "ba505676d0fdc829e90894931abb48b51ce4c24932d3d7e1c71a4cb505c56958",
+        "src/sales.ts": "c09111978f40259e9625b3666979ed7723ea67ccbb81f7374b17ca9f846fbc88",
+        "test/public.mjs": "457163dd537601f9669440273b4227dd7385d78046d9a399b78afbada793af84"
+      }
+    },
+    {
+      "id": "ts-slugify",
+      "language": "typescript",
+      "title": "Normalize URL slugs",
+      "issue": "slugify must normalize punctuation and repeated separators while trimming the result.",
+      "baseState": "frozen-ts-slugify-1",
+      "seed": "frozen-ts-slugify-1",
+      "publicCommands": [
+        "node --test test/public.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/index.ts": "e1aa5a878059ce53cac583633c99825576af888b43711b609ef11f6b0f219a07",
+        "src/slug.ts": "8ab9f516501a4d38d365b0b3c53b7ff2cae543e2a645ebf88465788bb58e66a7",
+        "test/public.mjs": "cbe23295fdd7a0f9dd07f9711d27e9c1697624092303b2f8bffd8ed2e24dd042"
+      }
+    },
+    {
+      "id": "ts-window-average",
+      "language": "typescript",
+      "title": "Average a trailing window",
+      "issue": "windowAverage must average only the requested trailing values and reject empty input.",
+      "baseState": "frozen-ts-window-average-1",
+      "seed": "frozen-ts-window-average-1",
+      "publicCommands": [
+        "node --test test/public.mjs"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/average.ts": "c4bc05a221edfd5fada700a60020b11a74d4c5f7a2d1d7ff0fc3b6c270fdbe1f",
+        "src/index.ts": "b9f151de0e9e1a58d78e442e00b478c0b344c90ee2a19050695e11d1994a0083",
+        "test/public.mjs": "261b5592f6995604fee79cc7cb5dfab3e97559d89c09a78fda673840bcfeaa8b"
+      }
+    },
+    {
+      "id": "py-median",
+      "language": "python",
+      "title": "Calculate an even median",
+      "issue": "median_value must average the two middle values for an even-sized input.",
+      "baseState": "frozen-py-median-1",
+      "seed": "frozen-py-median-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "eb6cf55e549a01eeca60c56587cbf847b4aaf862b1cd109ecd39d0e6213f2092",
+        "test_public.py": "397839ec572be74265fa86b4a1c659af2edffbac7c562e494fb69351f81c71de"
+      }
+    },
+    {
+      "id": "py-word-count",
+      "language": "python",
+      "title": "Count normalized words",
+      "issue": "word_counts must normalize case and ignore punctuation around words.",
+      "baseState": "frozen-py-word-count-1",
+      "seed": "frozen-py-word-count-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "c2bffca042fe50b9c921d4eff14fd5478cfa74c0ebabf14b45056a5e194199f3",
+        "test_public.py": "3ead9735c03e0d8ad1c79f96f9e0b00f22e4197dc407cc8622b7c1dea0579beb"
+      }
+    },
+    {
+      "id": "py-schedule",
+      "language": "python",
+      "title": "Check working-day availability",
+      "issue": "is_available must reject weekends and compare blocked day names case-insensitively.",
+      "baseState": "frozen-py-schedule-1",
+      "seed": "frozen-py-schedule-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "e1ec806c6896b1432ea7b656eca044668a725a78ea4409ff6d19c21ccb8c56bb",
+        "test_public.py": "393317519b6e12e62bc39fc02862ea77962618a72391d4ff5957987f673eb1f9"
+      }
+    },
+    {
+      "id": "py-merge-settings",
+      "language": "python",
+      "title": "Merge nested settings",
+      "issue": "merge_settings must preserve unspecified nested defaults without mutating either input.",
+      "baseState": "frozen-py-merge-settings-1",
+      "seed": "frozen-py-merge-settings-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "3d0dc36194df74ad61eed585b4b833d011ebba2957254eb9df98ee22f95e0a7b",
+        "test_public.py": "6eb8cf781142bda162ff850eb92a14ecf3606fd6ba32cc039d04dfaba27f742b"
+      }
+    },
+    {
+      "id": "py-log-summary",
+      "language": "python",
+      "title": "Summarize log levels",
+      "issue": "summarize_log must count recognized levels case-insensitively and ignore malformed lines.",
+      "baseState": "frozen-py-log-summary-1",
+      "seed": "frozen-py-log-summary-1",
+      "publicCommands": [
+        "python3 -m unittest test_public.py"
+      ],
+      "allowedPaths": [
+        "src/**"
+      ],
+      "files": {
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/app.py": "aae04696a3791e51b1187bf27190c27ad4caff3dccc40fe9558ef9548d4c3775",
+        "test_public.py": "436dd87f12c330194a5890b8f50ad0378bcc4fad87f5652d4fc22cc47130a568"
       }
     }
   ]

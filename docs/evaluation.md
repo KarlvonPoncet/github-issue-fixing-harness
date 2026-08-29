@@ -2,13 +2,19 @@
 
 ## What the current benchmark is
 
-The checked-in benchmark contains ten small frozen fixtures: five TypeScript
-and five Python tasks covering arithmetic, positive-value validation, contact
-formatting, stable uniqueness, and zero-valued configuration. Each task fixes
-base files, issue text, public command(s), allowed paths, and a hidden check.
-`fixtures/manifest.json` exposes solver-facing metadata and base-file hashes;
-reference candidates and hidden checks are implementation data in
-`src/benchmarks.ts` and are not exposed by `bench view`.
+The checked-in benchmark contains twenty frozen local fixtures: ten
+TypeScript and ten Python tasks. The original arithmetic, positive-value
+validation, contact formatting, stable uniqueness, and zero-valued
+configuration tasks are joined by quoted CSV parsing, bounded retries,
+malformed-record filtering, slug normalization, trailing-window averages,
+even medians, normalized word counts, working-day availability, recursive
+settings merges, and log-level aggregation. The corpus includes a
+multi-command TypeScript case with a separate public regression assertion.
+Each task fixes base files, issue text, public command(s), allowed paths, a
+stable seed equal to its frozen base-state ID, a reference candidate, and a
+hidden check. `fixtures/manifest.json` exposes solver-facing metadata and
+base-file hashes; reference candidates and hidden checks are implementation
+data in `src/benchmarks.ts` and are not exposed by `bench view`.
 
 `gradeBenchmark` creates fresh temporary baseline, candidate, and hidden
 copies. It performs, in order:
@@ -25,18 +31,21 @@ known, all candidate checks (public and hidden) pass, and no forbidden path was
 changed. `regressionFree` is a separate check-derived result. Timing and raw
 check outcomes are recorded. Grading never asks a model whether it succeeded.
 
-`bench summary --solutions` materializes the ten checked-in reference solutions
+`bench summary --solutions` materializes the twenty checked-in reference solutions
 and grades them. This is **grader sanity**, demonstrating that the evaluator can
 recognize intended solutions and expected baseline failures. It is not model
 effectiveness, not a reliability estimate, and not evidence of production
-performance. A candidate attempt can be supplied with `bench grade --task
+performance. `reports/reference-sanity-v2.json` records the current offline
+reference run in machine-readable form; regenerate it with
+`node dist/cli.js bench summary --solutions --output reports/reference-sanity-v2.json`
+after building. A candidate attempt can be supplied with `bench grade --task
 <TASK> --attempt <DIR>` or `--patch <FILE>`; inspect the command help for the
 current exact synopsis.
 
 ## What it does not prove
 
-- Ten tiny tasks do not establish broad language, repository, issue, or model
-  coverage.
+- Twenty small tasks across only TypeScript and Python do not establish broad
+  language, repository, issue, or model coverage.
 - Reference-solution success does not show that a model can find the solution.
 - The hidden checks are checked into the same benchmark implementation, not a
   held-out corpus. A solver or evaluator maintainer with repository access may
@@ -73,15 +82,23 @@ the aggregate field is null.
 `missingCalls`, `partialCalls`, and `provenance` make incomplete accounting
 explicit. Costs stay null unless pricing is explicitly marked configured and
 trusted; `costProvenance` records that decision. No secret, credential, or
-local attempt path belongs in a report.
+local attempt path belongs in a report. A supplied model usage summary can be
+associated with one grade, but deterministic corpus runs never fabricate
+usage or imply model efficacy.
 
 ## Required test layers for future work
 
 The existing `test/core.test.ts` covers important deterministic contracts:
 strict schemas, queue deduplication and lease recovery, webhook signatures and
 filtering, polling checkpoints, workspace boundaries and redaction, credential
-privacy, provider fakes/replays, worker state/budget behavior, all ten fixture
-solutions, and test-input protection. Keep these tests fast and offline.
+privacy, provider fakes/replays, worker state/budget behavior, all twenty
+fixture solutions, manifest/hash discovery, CLI summary serialization,
+incomplete and regressing candidates, malformed/no-op patches, command
+timeouts, token aggregation, and test-input protection. Keep these tests
+offline. The full reference corpus is the slower local tier (roughly tens of
+seconds on the development runner); select it directly with
+`npm run bench:reference -- --output /tmp/issue-harness-reference.json` or run
+`npm test` for the same checks plus the rest of the suite.
 
 Changes should add the appropriate layer rather than relying on one broad
 end-to-end test:

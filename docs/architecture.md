@@ -45,10 +45,12 @@ this document intentionally points to them rather than copying every field.
    manifest; missing provider fields remain null.
 7. **Grading and reporting.** `bench grade` independently materializes a fresh
    baseline and candidate, runs baseline/candidate/hidden checks, validates
-   changed paths, and emits evidence plus a versioned per-case report. `task
-run` does **not** invoke this grader. The CLI emits a compact terminal
-   result, artifact IDs, model usage, and benchmark report; `--output` persists
-   the report as JSON. Non-resolved terminal outcomes return a non-zero status.
+   changed paths, and emits evidence plus a versioned per-case report. Candidate
+   public checks remain the regression-free signal; hidden failures prevent
+   `Resolved@1` without being mislabeled as public regressions. `task run` does
+   **not** invoke this grader. The CLI emits a compact terminal result, artifact
+   IDs, model usage, and benchmark report; `--output` persists the report as
+   JSON. Non-resolved terminal outcomes return a non-zero status.
 
 The state machine's progression is bounded, but completion is not proof of a
 correct patch. In particular, the present `task run` evidence has an empty
@@ -88,9 +90,9 @@ commands.
   workspace `git-diff` forms.
 - `src/model.ts` owns the provider boundary. Provider SDK objects do not cross
   `ModelTransport`; only normalized text, tool calls, and usage do.
-- `src/benchmarks.ts` owns the ten frozen tasks and independent grading. The
-  checked-in `fixtures/manifest.json` mirrors solver-facing fixture metadata
-  and file hashes.
+- `src/benchmarks.ts` owns the twenty frozen tasks, stable base-state seeds,
+  and independent grading. The checked-in `fixtures/manifest.json` mirrors
+  solver-facing fixture metadata and base-file hashes.
 
 ## Persistence, recovery, and concurrency
 

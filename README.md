@@ -38,9 +38,11 @@ node dist/cli.js bench list
 node dist/cli.js bench summary --solutions
 ```
 
-The final command grades the ten checked-in reference solutions. It is a grader
-sanity check, not evidence that a model can solve real issues. The complete
-command and development reference is in [Development and CLI usage](docs/usage.md).
+The final command grades the twenty checked-in reference solutions. It is a grader
+sanity check, not evidence that a model can solve real issues. The slower
+reference tier is also available as `npm run bench:reference`; add
+`--output /tmp/issue-harness-reference.json` when a durable JSON result is
+needed. The complete command and development reference is in [Development and CLI usage](docs/usage.md).
 
 The CLI is non-interactive except for the explicit Codex OAuth login flow.
 Machine-readable results are TOON on stdout; diagnostics are on stderr. Unknown
@@ -104,21 +106,31 @@ for boundaries and safe local operation.
 
 ## Benchmark scope
 
-The frozen benchmark has five TypeScript and five Python fixtures. The grader
-runs baseline public checks, candidate public checks, hidden checks, and
-allowed-path validation in fresh temporary directories. It reports
-`Resolved@1`-compatible success, regression-free status, timing, and failure
-categories. `bench grade` and `bench summary` also emit a versioned report with
-one case record per fixture; `--output <file>` persists that report as JSON.
-The deterministic grader has no model calls, so its per-case token usage is
-explicitly `not_applicable` with null token totals rather than fabricated
-zeros. Model-run manifests and event logs retain provider-reported token
-breakdowns, including partial and missing usage. Reference-solution checks
-establish that the grader can recognize known solutions and classify expected
-baseline failures; they do not measure model effectiveness, production
-reliability, or generalization. Hidden checks are currently in the same
-checked-in benchmark implementation, so this is not held-out evaluation. See
-[Evaluation methodology](docs/evaluation.md).
+The frozen benchmark has ten TypeScript and ten Python fixtures. The original
+small arithmetic, validation, formatting, uniqueness, and configuration cases
+are joined by quoted-field parsing, retry bounds, malformed-record handling,
+slug normalization, trailing-window aggregation, medians, word counting,
+working-day policy, nested settings, and log-level aggregation. One fixture
+runs two independent public commands so a candidate regression outside the
+headline assertion is visible. The grader runs baseline public checks,
+candidate public/regression checks, hidden checks, and allowed-path validation
+in fresh temporary directories. Each fixture has a stable ID and seed (the
+frozen base-state identifier), auditable base-file hashes in
+`fixtures/manifest.json`, deterministic reference solution, and explicit
+failure category.
+
+It reports `Resolved@1`-compatible success, regression-free public-check
+status, timing, and failure categories. `bench grade` and `bench summary` also
+emit a versioned report with one case record per fixture; `--output <file>`
+persists that report as JSON. The deterministic grader has no model calls, so
+its per-case token usage is explicitly `not_applicable` with null token totals
+rather than fabricated zeros. Model-run manifests and event logs retain
+provider-reported token breakdowns, including partial and missing usage.
+Reference-solution checks establish that the grader can recognize known
+solutions and classify expected baseline failures; they do not measure model
+effectiveness, production reliability, or generalization. Hidden checks are
+currently in the same checked-in benchmark implementation, so this is not
+held-out evaluation. See [Evaluation methodology](docs/evaluation.md).
 
 ## Contributing
 

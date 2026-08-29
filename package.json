@@ -37,6 +37,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
+    "bench:reference": "node --import tsx src/cli.ts bench summary --solutions",
     "demo": "node --import tsx src/cli.ts demo",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
     "prepack": "npm run build"

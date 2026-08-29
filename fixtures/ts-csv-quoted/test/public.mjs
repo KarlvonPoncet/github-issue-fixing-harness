@@ -1,0 +1,1 @@
+import assert from "node:assert/strict"; import test from "node:test"; import { parseCsvLine } from "../src/index.ts"; test("quoted comma",()=>assert.deepEqual(parseCsvLine("\"Ada,42\",active"), ["Ada,42","active"]));

@@ -1,0 +1,1 @@
+import assert from "node:assert/strict"; import test from "node:test"; import { retry } from "../src/index.ts"; test("retries then succeeds",()=>{let calls=0; assert.equal(retry(()=>{calls+=1; if(calls<3) throw new Error("try again"); return "ok";},3), "ok"); assert.equal(calls,3);});

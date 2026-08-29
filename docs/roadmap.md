@@ -25,9 +25,11 @@ keeps correctness and trust prerequisites ahead of GitHub automation.
    distributed lock or multi-worker coordination.
 5. **Delivery is absent.** The harness does not create branches or commits,
    push, open or update PRs, request review, merge, or mutate GitHub.
-6. **Evaluation is narrow.** Ten small fixtures and same-repository hidden checks
-   establish deterministic grader behavior, not model effectiveness,
-   generalization, production reliability, or held-out performance.
+6. **Evaluation is narrow.** Twenty small TypeScript/Python fixtures, including
+   one multi-command regression case, and same-repository hidden checks
+   establish deterministic grader behavior and failure classification, not
+   model effectiveness, broad repository generalization, production
+   reliability, or held-out performance.
 
 ## Prioritized milestones
 

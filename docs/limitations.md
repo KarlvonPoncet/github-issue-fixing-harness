@@ -21,8 +21,10 @@ These are implemented limitations, not merely future features:
   coordination.
 - No branch, commit, push, draft PR, review request, merge, or other GitHub
   delivery/mutation is implemented.
-- The ten fixtures and their hidden checks are a deterministic grader sanity
-  suite, not held-out or general-purpose model evaluation.
+- The twenty TypeScript/Python fixtures and their hidden checks are a
+  deterministic grader sanity suite, not held-out or general-purpose model
+  evaluation. They remain small and do not represent broad repository or
+  language coverage.
 
 The dependency-ordered remediation plan is in [the roadmap](roadmap.md); the
 contracts and recovery assumptions are in
