@@ -825,12 +825,20 @@ test('benchmark catches incomplete fixes, regressions, scope violations, and pat
 test('benchmark records command timeouts as failed checks without claiming a fix', async () => {
   const root = await mkdtemp('/tmp/issue-harness-benchmark-timeout-');
   const attempt = join(root, 'attempt');
+  const completionMarker = join(root, 'completed');
   await materializeBenchmarkTask('ts-addition', attempt, 'solution');
-  const result = await gradeBenchmark({ taskId: 'ts-addition', attempt, maxCommandMs: 1 });
+  await writeFile(
+    join(attempt, 'test/public.mjs'),
+    `import { writeFile } from 'node:fs/promises';\nsetTimeout(() => writeFile(${JSON.stringify(completionMarker)}, 'alive'), 200);\n`,
+    'utf8',
+  );
+  const result = await gradeBenchmark({ taskId: 'ts-addition', attempt, maxCommandMs: 10 });
   assert.equal(result.summary.resolvedAt1, false);
   assert.equal(result.summary.regressionFree, false);
   assert.ok(result.evidence.checks.some((check) => check.status === 'failed'));
   assert.ok(result.evidence.checks.some((check) => /timed out|spawn|ERR_/.test(check.output)));
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await assert.rejects(() => stat(completionMarker), { code: 'ENOENT' });
 });
 
 test('benchmark grading requires exactly one attempt source', async () => {

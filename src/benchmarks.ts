@@ -915,18 +915,21 @@ async function runCheck(
   await mkdir(join(cwd, '.harness-tmp'), { recursive: true, mode: 0o700 });
   const parts = command.split(' ');
   const started = Date.now();
+  const controller = new AbortController();
+  const child = execFileAsync(parts[0] ?? '', parts.slice(1), {
+    cwd,
+    env: {
+      PATH: process.env.PATH,
+      HOME: join(cwd, '.harness-home'),
+      TMPDIR: join(cwd, '.harness-tmp'),
+      HARNESS: '1',
+    },
+    maxBuffer: 200_000,
+    signal: controller.signal,
+  });
   try {
     const result = await withTimeout(
-      execFileAsync(parts[0] ?? '', parts.slice(1), {
-        cwd,
-        env: {
-          PATH: process.env.PATH,
-          HOME: join(cwd, '.harness-home'),
-          TMPDIR: join(cwd, '.harness-tmp'),
-          HARNESS: '1',
-        },
-        maxBuffer: 200_000,
-      }),
+      child,
       timeoutMs,
       `${phase} check`,
     );
@@ -940,6 +943,10 @@ async function runCheck(
       output: redactSecrets(`${result.stdout}${result.stderr}`),
     };
   } catch (error) {
+    if (error instanceof HarnessError && error.code === 'timeout') {
+      controller.abort();
+      await child.catch(() => undefined);
+    }
     const e = error as { code?: number; stdout?: string; stderr?: string; message?: string };
     return {
       name: `${phase}:${command}`,
