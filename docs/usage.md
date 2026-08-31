@@ -189,8 +189,9 @@ provider/model profile, budget, elapsed time, usage, failure category, and
 residual risks. In addition, each `task run` writes:
 
 - `.harness/logs/<run-id>.jsonl`, one redacted `RunEvent` JSON object per line;
-- `.harness/logs/<run-id>.manifest.json`, an atomically updated redacted run
-  manifest snapshot.
+- `.harness/logs/<run-id>.manifest.json`, a redacted run manifest snapshot
+  written atomically at run start and refreshed at terminal and
+  artifact-persistence milestones.
 
 The JSON-lines file starts with `run_started` and records state entry/exit,
 allowlisted tool names and IDs (not arguments or content), model usage counts

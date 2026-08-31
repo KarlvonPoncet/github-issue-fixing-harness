@@ -41,9 +41,10 @@ this document intentionally points to them rather than copying every field.
    Tool calls, results, and one `model_usage` event per attempted model call
    become typed run events. The worker sends that same event stream to
    `RunLogger`, which appends synced, redacted JSON-lines records as the run
-   proceeds. It also maintains a redacted manifest snapshot, so state changes,
-   tool/model metadata, warnings/errors, and terminal outcomes survive a
-   partial run. The worker collects a git diff limited to configured paths and
+   proceeds. It writes a redacted manifest snapshot at run start and refreshes
+   it at terminal and artifact-persistence milestones. The event log preserves
+   state changes, tool/model metadata, warnings, and errors during a partial
+   run. The worker collects a git diff limited to configured paths and
    writes issue, patch, event-log, and evidence artifacts, followed by a run
    manifest. Usage is also recorded in the evidence and manifest; missing
    provider fields remain null.

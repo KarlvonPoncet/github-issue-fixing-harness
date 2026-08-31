@@ -186,6 +186,7 @@ async function runTaskCommand(queue: DurableQueue, argv: string[]): Promise<numb
   const logger = await store.logs.create(runId);
   const started = Date.now();
   try {
+    await queue.transition(item.task.id, 'claimed');
     await queue.markRunning(item.task.id);
     const runner = new AgentRunner({
       task: item.task,
