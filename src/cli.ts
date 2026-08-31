@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -179,61 +180,84 @@ async function runTaskCommand(queue: DurableQueue, argv: string[]): Promise<numb
     maxPatchBytes: item.task.policy.maxPatchBytes,
     maxInputChars: 50_000,
   });
-  await queue.markRunning(item.task.id);
-  const started = Date.now();
-  const runner = new AgentRunner({ task: item.task, workspace, transport, profile, budget });
-  const result = await runner.run();
   const store = new ArtifactStore();
   await store.init();
-  const records = await Promise.all([
-    store.put('issue', JSON.stringify(item.task), `${result.manifest.runId}-issue`),
-    store.put('patch', result.patch, `${result.manifest.runId}-patch`),
-    store.put('event_log', JSON.stringify(result.events), `${result.manifest.runId}-events`),
-    store.put(
-      'evidence',
-      JSON.stringify({
-        schemaVersion: SCHEMA_VERSION,
-        taskId: item.task.id,
-        runId: result.manifest.runId,
-        resolvedAt1: result.terminal.outcome === 'resolved',
-        regressionFree: result.terminal.outcome === 'resolved',
-        patchScopeValid: true,
-        forbiddenPathsTouched: [],
-        checks: [],
-        elapsedMs: Date.now() - started,
-        usage: result.usage,
-        failureCategory: result.terminal.failureCategory,
-        residualRisks: result.terminal.residualRisks,
-      }),
-      `${result.manifest.runId}-evidence`,
-    ),
-  ]);
-  result.manifest.artifactIds = records.map((record) => record.id);
-  const manifestRecord = await store.put(
-    'manifest',
-    JSON.stringify(result.manifest),
-    `${result.manifest.runId}-manifest`,
-  );
-  result.manifest.artifactIds.push(manifestRecord.id);
-  await store.index.upsertRun(result.manifest);
-  const nextState =
-    result.terminal.outcome === 'resolved'
-      ? 'succeeded'
-      : result.terminal.outcome === 'human_review'
-        ? 'review'
-        : result.terminal.outcome === 'cancelled'
-          ? 'cancelled'
-          : 'failed';
-  await queue.transition(item.task.id, nextState, result.terminal.reason);
-  emit({
-    runId: result.manifest.runId,
-    taskId: item.task.id,
-    status: result.manifest.status,
-    terminal: result.terminal,
-    artifactIds: result.manifest.artifactIds,
-    usage: result.usage,
-  });
-  return result.terminal.outcome === 'resolved' ? 0 : 1;
+  const runId = randomUUID();
+  const logger = await store.logs.create(runId);
+  const started = Date.now();
+  try {
+    await queue.transition(item.task.id, 'claimed');
+    await queue.markRunning(item.task.id);
+    const runner = new AgentRunner({
+      task: item.task,
+      workspace,
+      transport,
+      profile,
+      budget,
+      runId,
+      log: logger,
+    });
+    const result = await runner.run();
+    const records = await Promise.all([
+      store.put('issue', JSON.stringify(item.task), `${result.manifest.runId}-issue`),
+      store.put('patch', result.patch, `${result.manifest.runId}-patch`),
+      store.put('event_log', JSON.stringify(result.events), `${result.manifest.runId}-events`),
+      store.put(
+        'evidence',
+        JSON.stringify({
+          schemaVersion: SCHEMA_VERSION,
+          taskId: item.task.id,
+          runId: result.manifest.runId,
+          resolvedAt1: result.terminal.outcome === 'resolved',
+          regressionFree: result.terminal.outcome === 'resolved',
+          patchScopeValid: true,
+          forbiddenPathsTouched: [],
+          checks: [],
+          elapsedMs: Date.now() - started,
+          usage: result.usage,
+          failureCategory: result.terminal.failureCategory,
+          residualRisks: result.terminal.residualRisks,
+        }),
+        `${result.manifest.runId}-evidence`,
+      ),
+    ]);
+    result.manifest.artifactIds = records.map((record) => record.id);
+    const manifestRecord = await store.put(
+      'manifest',
+      JSON.stringify(result.manifest),
+      `${result.manifest.runId}-manifest`,
+    );
+    result.manifest.artifactIds.push(manifestRecord.id);
+    await store.index.upsertRun(result.manifest);
+    await logger.updateManifest(result.manifest);
+    const nextState =
+      result.terminal.outcome === 'resolved'
+        ? 'succeeded'
+        : result.terminal.outcome === 'human_review'
+          ? 'review'
+          : result.terminal.outcome === 'cancelled'
+            ? 'cancelled'
+            : 'failed';
+    await queue.transition(item.task.id, nextState, result.terminal.reason);
+    emit({
+      runId: result.manifest.runId,
+      taskId: item.task.id,
+      status: result.manifest.status,
+      terminal: result.terminal,
+      artifactIds: result.manifest.artifactIds,
+      usage: result.usage,
+      logPath: logger.path,
+    });
+    return result.terminal.outcome === 'resolved' ? 0 : 1;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await logger.error('terminal', message, error instanceof HarnessError ? error.code : 'error');
+    throw new HarnessError(
+      `${message}; run diagnostics: ${logger.path}`,
+      error instanceof HarnessError ? error.code : 'run_failed',
+      error instanceof HarnessError ? error.exitCode : 1,
+    );
+  }
 }
 
 async function benchmarkCommand(verb: string | undefined, argv: string[]): Promise<number> {

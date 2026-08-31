@@ -15,6 +15,7 @@ import type { ModelResponse, ModelToolCall, ModelTransport } from './model.js';
 import { summarizeUsage, unavailableUsage } from './usage.js';
 import type { ModelUsage, UsageSummary } from './usage.js';
 import type { Workspace } from './workspace.js';
+import type { RunLogger } from './storage.js';
 import { HarnessError, nowIso, redactSecrets, withTimeout } from './util.js';
 
 const order: AgentState[] = [
@@ -36,6 +37,8 @@ export interface AgentRunOptions {
   runId?: string;
   signal?: AbortSignal;
   onEvent?: (event: RunEvent) => Promise<void> | void;
+  /** Optional durable sink for the same event stream returned in the result. */
+  log?: RunLogger;
   /** Cost totals are withheld unless pricing evidence has been configured. */
   costsTrusted?: boolean;
 }
@@ -51,6 +54,7 @@ export interface AgentRunResult {
     residualRisks: string[];
   };
   usage: UsageSummary;
+  logPath?: string;
 }
 
 export class AgentRunner {
@@ -92,6 +96,14 @@ export class AgentRunner {
       usage: this.usage,
       artifactIds: [],
     };
+    await this.options.log?.start(manifest);
+    await this.event('run_started', 'inspect', {
+      taskId: task.id,
+      repository: task.repository,
+      provider: profile.provider,
+      model: profile.model,
+      runtime: profile.runtime,
+    });
     if (task.risk !== 'normal' || task.policy.requireHumanReviewFor.includes(task.risk)) {
       terminal = {
         outcome: 'human_review',
@@ -124,7 +136,11 @@ export class AgentRunner {
           const retry = (this.retries.get(current) ?? 0) + 1;
           this.retries.set(current, retry);
           this.lastFailure = result.failure;
-          await this.event('warning', current, { failure: result.failure, retry });
+          await this.event('error', current, {
+            failure: redactSecrets(result.failure),
+            retry,
+          });
+          await this.event('warning', current, { failure: redactSecrets(result.failure), retry });
           if (
             retry > budget.maxRetriesPerState ||
             (result.failure === this.lastFailure && retry > 1)
@@ -160,7 +176,11 @@ export class AgentRunner {
         const message = error instanceof Error ? error.message : String(error);
         const retry = (this.retries.get(current) ?? 0) + 1;
         this.retries.set(current, retry);
-        await this.event('warning', current, { failure: message, retry });
+        await this.event('error', current, {
+          failure: redactSecrets(message),
+          retry,
+        });
+        await this.event('warning', current, { failure: redactSecrets(message), retry });
         if (retry > budget.maxRetriesPerState) {
           terminal = {
             outcome: categoryFor(message) === 'timeout' ? 'timed_out' : 'failed',
@@ -310,7 +330,8 @@ export class AgentRunner {
         });
       throw new HarnessError(`unknown tool ${tool.name}`, 'invalid_tool');
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = redactSecrets(error instanceof Error ? error.message : String(error));
+      await this.event('error', state, { failure: message, tool: tool.name });
       return `ERROR:${message}`;
     }
   }
@@ -341,6 +362,7 @@ export class AgentRunner {
       data,
     };
     this.events.push(event);
+    await this.options.log?.append(event);
     await this.options.onEvent?.(event);
   }
 
@@ -348,7 +370,18 @@ export class AgentRunner {
     manifest: RunManifest,
     terminal: AgentRunResult['terminal'],
   ): Promise<AgentRunResult> {
-    const patch = await this.options.workspace.diff().catch(() => '');
+    terminal = {
+      ...terminal,
+      reason: redactSecrets(terminal.reason),
+      residualRisks: terminal.residualRisks.map((risk) => redactSecrets(risk)),
+    };
+    const patch = await this.options.workspace.diff().catch(async (error) => {
+      await this.event('error', 'terminal', {
+        failure: redactSecrets(error instanceof Error ? error.message : String(error)),
+        operation: 'collect_diff',
+      });
+      return '';
+    });
     this.usage = summarizeUsage(this.usageSamples, this.options.costsTrusted ?? false);
     manifest.updatedAt = nowIso();
     manifest.agentState = 'terminal';
@@ -365,9 +398,17 @@ export class AgentRunner {
     manifest.failureCategory = terminal.failureCategory;
     await this.event('terminal', 'terminal', {
       outcome: terminal.outcome,
-      reason: terminal.reason,
+      reason: redactSecrets(terminal.reason),
     });
-    return { manifest, events: this.events, patch, terminal, usage: this.usage };
+    await this.options.log?.updateManifest(manifest);
+    return {
+      manifest,
+      events: this.events,
+      patch,
+      terminal,
+      usage: this.usage,
+      logPath: this.options.log?.path,
+    };
   }
 }
 

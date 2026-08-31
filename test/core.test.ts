@@ -21,7 +21,7 @@ import {
 } from '../src/benchmarks.js';
 import { GitHubPollingAdapter, GitHubWebhookAdapter } from '../src/github.js';
 import { DurableQueue } from '../src/queue.js';
-import { ArtifactStore } from '../src/storage.js';
+import { ArtifactStore, RunLogStore } from '../src/storage.js';
 import {
   parseNormalizedTask,
   parseRunEvent,
@@ -526,6 +526,127 @@ test('agent transitions through every bounded state with a fake transport', asyn
     ),
     new Set(['inspect', 'reproduce', 'plan', 'edit', 'test', 'self_review', 'terminal']),
   );
+});
+
+test('run logs persist the complete successful lifecycle and redact diagnostics', async () => {
+  const root = await mkdtemp('/tmp/issue-harness-run-log-success-');
+  const workspace = await makeWorkspace(join(root, 'workspace'), {
+    allowedCommands: [],
+    allowedPaths: ['src/**'],
+    forbiddenPaths: [],
+  });
+  const store = new ArtifactStore(join(root, 'store'));
+  await store.init();
+  const logger = await store.logs.create('successful-run');
+  const secret = ['sk-', 'fixture-log-secret-material-123456'].join('');
+  const result = await new AgentRunner({
+    task: task('logged-success'),
+    workspace,
+    transport: new FakeTransport((_request, call) => ({
+      text: call === 1 ? `response token=${secret}` : 'ok',
+      toolCalls: [],
+    })),
+    profile: { provider: 'openai', model: 'fake', auth: 'api_key', runtime: 'fake' },
+    budget: {
+      schemaVersion: SCHEMA_VERSION,
+      maxSteps: 10,
+      maxModelCalls: 8,
+      maxRetriesPerState: 0,
+      timeoutMs: 1000,
+      maxOutputChars: 1000,
+      maxPatchBytes: 1000,
+      maxInputChars: 1000,
+    },
+    runId: 'successful-run',
+    log: logger,
+  }).run();
+  assert.equal(result.terminal.outcome, 'resolved');
+  const lines = (await readFile(logger.path, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { type: string; runId: string; sequence: number });
+  assert.deepEqual(
+    lines.map((line) => line.type),
+    [
+      'run_started',
+      'state_entered',
+      'model_usage',
+      'state_exited',
+      'state_entered',
+      'model_usage',
+      'state_exited',
+      'state_entered',
+      'model_usage',
+      'state_exited',
+      'state_entered',
+      'model_usage',
+      'state_exited',
+      'state_entered',
+      'model_usage',
+      'state_exited',
+      'state_entered',
+      'model_usage',
+      'state_exited',
+      'state_entered',
+      'error',
+      'terminal',
+    ],
+  );
+  assert.ok(
+    lines.every((line, index) => line.runId === 'successful-run' && line.sequence === index),
+  );
+  assert.doesNotMatch(await readFile(logger.path, 'utf8'), /fixture-log-secret-material/);
+  const manifest = JSON.parse(await readFile(logger.manifestPath, 'utf8')) as { status: string };
+  assert.equal(manifest.status, 'succeeded');
+});
+
+test('run logs preserve failure events, isolate runs, and reject unavailable storage', async () => {
+  const root = await mkdtemp('/tmp/issue-harness-run-log-failure-');
+  const store = new RunLogStore(root);
+  await store.init();
+  const [first, second] = await Promise.all([
+    store.create('failure-run'),
+    store.create('other-run'),
+  ]);
+  await assert.rejects(() => store.create('failure-run'), /already exists/);
+  assert.notEqual(first.path, second.path);
+  await first.error(
+    'inspect',
+    'provider failed with token=sk-fixture-log-secret-material-123456',
+    'model_error',
+  );
+  const workspace = await makeWorkspace(join(root, 'workspace'), {
+    allowedCommands: [],
+    allowedPaths: ['src/**'],
+    forbiddenPaths: [],
+  });
+  const result = await new AgentRunner({
+    task: task('logged-failure'),
+    workspace,
+    transport: new FakeTransport(() => {
+      throw new Error('provider unavailable');
+    }),
+    profile: { provider: 'openai', model: 'fake', auth: 'api_key', runtime: 'fake' },
+    budget: {
+      schemaVersion: SCHEMA_VERSION,
+      maxSteps: 2,
+      maxModelCalls: 2,
+      maxRetriesPerState: 0,
+      timeoutMs: 1000,
+      maxOutputChars: 1000,
+      maxPatchBytes: 1000,
+      maxInputChars: 1000,
+    },
+    runId: 'agent-failure-run',
+    log: await store.create('agent-failure-run'),
+  }).run();
+  assert.equal(result.terminal.outcome, 'failed');
+  const failureLog = await readFile(join(root, 'logs', 'agent-failure-run.jsonl'), 'utf8');
+  assert.match(failureLog, /"type":"error"/);
+  assert.match(failureLog, /"type":"terminal"/);
+  assert.doesNotMatch(await readFile(first.path, 'utf8'), /fixture-log-secret-material/);
+  await writeFile(join(root, 'unavailable'), 'not a directory', 'utf8');
+  await assert.rejects(() => new RunLogStore(join(root, 'unavailable')).init());
 });
 
 test('agent cancellation and budgets produce explicit terminal reasons', async () => {
