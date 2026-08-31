@@ -1,6 +1,8 @@
 export * from './agent.js';
 export * from './auth.js';
 export {
+  BENCHMARK_VERSION,
+  EVALUATOR_VERSION,
   createBenchmarkRunReport,
   describeBenchmarkTask,
   gradeBenchmark,

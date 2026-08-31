@@ -1,0 +1,1 @@
+export function summarizeSales(records: Array<{ amount: number }>): { count: number; total: number } { return { count: records.length, total: records.reduce((sum, record) => sum + record.amount, 0) }; }

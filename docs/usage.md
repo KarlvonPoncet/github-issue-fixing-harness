@@ -153,13 +153,18 @@ node dist/cli.js demo
 ```
 
 The `bench run` and `bench replay` names are aliases of grading in this phase;
-they do not run a model. Benchmark commands emit a versioned report with
-per-case outcomes, timing, configuration, and token-accounting provenance.
-Use `--output <file>` to persist that report as JSON. The deterministic grader
-has no model usage, so every case reports `provenance: not_applicable` and null
-rather than zero token totals. Model-run manifests and event logs retain
-provider fields when available; missing and partial fields remain explicit,
-and costs are null unless trusted pricing evidence is configured.
+they do not run a model. The frozen corpus currently contains twenty cases
+across the supported TypeScript and Python local command boundaries. Each
+case has a stable seed equal to its base-state ID; `bench list` exposes it and
+`fixtures/manifest.json` records auditable base-file hashes. Benchmark commands
+emit a versioned report with per-case outcomes, timing, configuration, and
+token-accounting provenance. Use `--output <file>` to persist that report as
+JSON. `npm run bench:reference -- --output <file>` runs the slower all-reference
+sanity tier. The deterministic grader has no model usage, so every case reports
+`provenance: not_applicable` and null rather than zero token totals. Model-run
+manifests and event logs retain provider fields when available; missing and
+partial fields remain explicit, and costs are null unless trusted pricing
+evidence is configured.
 `webhook ingest` reads a JSON event from disk and verifies the supplied
 signature; it is an adapter exercise, not an HTTP listener. To make a
 signature for a local body, use a shell tool without printing the secret:

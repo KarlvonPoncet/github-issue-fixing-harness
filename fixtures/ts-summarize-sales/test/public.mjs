@@ -1,0 +1,1 @@
+import assert from "node:assert/strict"; import test from "node:test"; import { summarizeSales } from "../src/index.ts"; test("skips malformed amounts",()=>assert.deepEqual(summarizeSales([{amount:2},{amount:"bad"},{amount:5},{amount:NaN}]), {count:2,total:7}));

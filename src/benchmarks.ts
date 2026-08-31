@@ -14,7 +14,7 @@ import { HarnessError, atomicWrite, nowIso, redactSecrets, sha256, withTimeout }
 
 const execFileAsync = promisify(execFile);
 
-export const EVALUATOR_VERSION = 'local-deterministic-v1' as const;
+export const EVALUATOR_VERSION = 'local-deterministic-v2' as const;
 
 export interface BenchmarkTaskView {
   id: string;
@@ -22,11 +22,12 @@ export interface BenchmarkTaskView {
   title: string;
   issue: string;
   baseState: string;
+  seed: string;
   publicCommands: string[];
   allowedPaths: string[];
 }
 
-interface BenchmarkTask extends BenchmarkTaskView {
+interface BenchmarkTask extends Omit<BenchmarkTaskView, 'seed'> {
   baseFiles: Record<string, string>;
   solutionFiles: Record<string, string>;
   hiddenFiles: Record<string, string>;
@@ -305,6 +306,291 @@ const tasks: BenchmarkTask[] = [
     },
     hiddenCommands: ['python3 -m unittest test_hidden.py'],
   },
+  {
+    id: 'ts-csv-quoted',
+    language: 'typescript',
+    title: 'Parse quoted CSV fields',
+    issue: 'parseCsvLine must keep commas inside quoted fields and decode escaped quotes.',
+    baseState: 'frozen-ts-csv-quoted-1',
+    publicCommands: ['node --test test/public.mjs', 'node --test test/regression.mjs'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/index.ts': 'export { parseCsvLine } from "./csv.ts";\n',
+      'src/csv.ts':
+        'export function parseCsvLine(line: string): string[] { return line.split(","); }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { parseCsvLine } from "../src/index.ts"; test("quoted comma",()=>assert.deepEqual(parseCsvLine("\\"Ada,42\\",active"), ["Ada,42","active"]));\n',
+      'test/regression.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { parseCsvLine } from "../src/index.ts"; test("empty unquoted field",()=>assert.deepEqual(parseCsvLine("Ada,,active"), ["Ada","","active"]));\n',
+    },
+    solutionFiles: {
+      'src/index.ts': 'export { parseCsvLine } from "./csv.ts";\n',
+      'src/csv.ts':
+        'export function parseCsvLine(line: string): string[] { const values: string[] = []; let current = ""; let quoted = false; for (let i = 0; i < line.length; i += 1) { const char = line[i]; if (char === "\\\"") { if (quoted && line[i + 1] === "\\\"") { current += "\\\""; i += 1; } else quoted = !quoted; } else if (char === "," && !quoted) { values.push(current); current = ""; } else current += char; } values.push(current); return values; }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { parseCsvLine } from "../src/index.ts"; test("quoted comma",()=>assert.deepEqual(parseCsvLine("\\"Ada,42\\",active"), ["Ada,42","active"]));\n',
+      'test/regression.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { parseCsvLine } from "../src/index.ts"; test("empty unquoted field",()=>assert.deepEqual(parseCsvLine("Ada,,active"), ["Ada","","active"]));\n',
+    },
+    hiddenFiles: {
+      'test_hidden.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { parseCsvLine } from "./src/index.ts"; test("escaped quote",()=>assert.deepEqual(parseCsvLine("\\"say \\\"\\\"hi\\\"\\\"\\",ok"), ["say \\\"hi\\\"", "ok"]));\n',
+    },
+    hiddenCommands: ['node --test test_hidden.mjs'],
+  },
+  {
+    id: 'ts-retry',
+    language: 'typescript',
+    title: 'Retry a failing operation',
+    issue: 'retry must make at most the requested attempts and reject invalid attempt counts.',
+    baseState: 'frozen-ts-retry-1',
+    publicCommands: ['node --test test/public.mjs'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/index.ts': 'export { retry } from "./retry.ts";\n',
+      'src/retry.ts':
+        'export function retry<T>(operation: () => T, attempts: number): T { return operation(); }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { retry } from "../src/index.ts"; test("retries then succeeds",()=>{let calls=0; assert.equal(retry(()=>{calls+=1; if(calls<3) throw new Error("try again"); return "ok";},3), "ok"); assert.equal(calls,3);});\n',
+    },
+    solutionFiles: {
+      'src/index.ts': 'export { retry } from "./retry.ts";\n',
+      'src/retry.ts':
+        'export function retry<T>(operation: () => T, attempts: number): T { if (!Number.isInteger(attempts) || attempts < 1) throw new RangeError("attempts must be positive"); let last: unknown; for (let i = 0; i < attempts; i += 1) { try { return operation(); } catch (error) { last = error; } } throw last instanceof Error ? last : new Error("operation failed"); }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { retry } from "../src/index.ts"; test("retries then succeeds",()=>{let calls=0; assert.equal(retry(()=>{calls+=1; if(calls<3) throw new Error("try again"); return "ok";},3), "ok"); assert.equal(calls,3);});\n',
+    },
+    hiddenFiles: {
+      'test_hidden.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { retry } from "./src/index.ts"; test("rejects zero without invoking",()=>{let calls=0; assert.throws(()=>retry(()=>{calls+=1; return "bad";},0), RangeError); assert.equal(calls,0);});\n',
+    },
+    hiddenCommands: ['node --test test_hidden.mjs'],
+  },
+  {
+    id: 'ts-summarize-sales',
+    language: 'typescript',
+    title: 'Summarize valid sales',
+    issue: 'summarizeSales must ignore records whose amount is not a finite number.',
+    baseState: 'frozen-ts-summarize-sales-1',
+    publicCommands: ['node --test test/public.mjs'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/index.ts': 'export { summarizeSales } from "./sales.ts";\n',
+      'src/sales.ts':
+        'export function summarizeSales(records: Array<{ amount: number }>): { count: number; total: number } { return { count: records.length, total: records.reduce((sum, record) => sum + record.amount, 0) }; }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { summarizeSales } from "../src/index.ts"; test("skips malformed amounts",()=>assert.deepEqual(summarizeSales([{amount:2},{amount:"bad"},{amount:5},{amount:NaN}]), {count:2,total:7}));\n',
+    },
+    solutionFiles: {
+      'src/index.ts': 'export { summarizeSales } from "./sales.ts";\n',
+      'src/sales.ts':
+        'export function summarizeSales(records: Array<{ amount: number }>): { count: number; total: number } { const valid = records.filter((record) => typeof record.amount === "number" && Number.isFinite(record.amount)); return { count: valid.length, total: valid.reduce((sum, record) => sum + record.amount, 0) }; }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { summarizeSales } from "../src/index.ts"; test("skips malformed amounts",()=>assert.deepEqual(summarizeSales([{amount:2},{amount:"bad"},{amount:5},{amount:NaN}]), {count:2,total:7}));\n',
+    },
+    hiddenFiles: {
+      'test_hidden.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { summarizeSales } from "./src/index.ts"; test("keeps negative finite amounts and does not mutate",()=>{const rows=[{amount:-2},{amount:3}]; assert.deepEqual(summarizeSales(rows), {count:2,total:1}); assert.deepEqual(rows,[{amount:-2},{amount:3}]);});\n',
+    },
+    hiddenCommands: ['node --test test_hidden.mjs'],
+  },
+  {
+    id: 'ts-slugify',
+    language: 'typescript',
+    title: 'Normalize URL slugs',
+    issue: 'slugify must normalize punctuation and repeated separators while trimming the result.',
+    baseState: 'frozen-ts-slugify-1',
+    publicCommands: ['node --test test/public.mjs'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/index.ts': 'export { slugify } from "./slug.ts";\n',
+      'src/slug.ts':
+        'export function slugify(value: string): string { return value.toLowerCase().replaceAll(" ", "-"); }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { slugify } from "../src/index.ts"; test("normalizes punctuation",()=>assert.equal(slugify(" Hello, World! "), "hello-world"));\n',
+    },
+    solutionFiles: {
+      'src/index.ts': 'export { slugify } from "./slug.ts";\n',
+      'src/slug.ts':
+        'export function slugify(value: string): string { return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { slugify } from "../src/index.ts"; test("normalizes punctuation",()=>assert.equal(slugify(" Hello, World! "), "hello-world"));\n',
+    },
+    hiddenFiles: {
+      'test_hidden.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { slugify } from "./src/index.ts"; test("collapses separators",()=>assert.equal(slugify("API___v2 / beta"), "api-v2-beta"));\n',
+    },
+    hiddenCommands: ['node --test test_hidden.mjs'],
+  },
+  {
+    id: 'ts-window-average',
+    language: 'typescript',
+    title: 'Average a trailing window',
+    issue: 'windowAverage must average only the requested trailing values and reject empty input.',
+    baseState: 'frozen-ts-window-average-1',
+    publicCommands: ['node --test test/public.mjs'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/index.ts': 'export { windowAverage } from "./average.ts";\n',
+      'src/average.ts':
+        'export function windowAverage(values: number[], window: number): number { return values.reduce((sum, value) => sum + value, 0) / values.length; }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { windowAverage } from "../src/index.ts"; test("uses trailing values",()=>assert.equal(windowAverage([1,3,5],2),4));\n',
+    },
+    solutionFiles: {
+      'src/index.ts': 'export { windowAverage } from "./average.ts";\n',
+      'src/average.ts':
+        'export function windowAverage(values: number[], window: number): number { if (!values.length || !Number.isInteger(window) || window < 1) throw new RangeError("positive window and values required"); const selected = values.slice(-window); return selected.reduce((sum, value) => sum + value, 0) / selected.length; }\n',
+      'test/public.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { windowAverage } from "../src/index.ts"; test("uses trailing values",()=>assert.equal(windowAverage([1,3,5],2),4));\n',
+    },
+    hiddenFiles: {
+      'test_hidden.mjs':
+        'import assert from "node:assert/strict"; import test from "node:test"; import { windowAverage } from "./src/index.ts"; test("handles oversized window and empty input",()=>{assert.equal(windowAverage([1,2],5),1.5); assert.throws(()=>windowAverage([],2), RangeError);});\n',
+    },
+    hiddenCommands: ['node --test test_hidden.mjs'],
+  },
+  {
+    id: 'py-median',
+    language: 'python',
+    title: 'Calculate an even median',
+    issue: 'median_value must average the two middle values for an even-sized input.',
+    baseState: 'frozen-py-median-1',
+    publicCommands: ['python3 -m unittest test_public.py'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/__init__.py': '',
+      'src/app.py':
+        'def median_value(values):\n    ordered = sorted(values)\n    return ordered[len(ordered) // 2]\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import median_value\nclass Public(unittest.TestCase):\n    def test_even(self): self.assertEqual(median_value([1, 4, 2, 8]), 3.0)\nif __name__ == "__main__": unittest.main()\n',
+    },
+    solutionFiles: {
+      'src/__init__.py': '',
+      'src/app.py':
+        'from statistics import median\n\ndef median_value(values):\n    if not values: raise ValueError("values required")\n    return median(values)\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import median_value\nclass Public(unittest.TestCase):\n    def test_even(self): self.assertEqual(median_value([1, 4, 2, 8]), 3.0)\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenFiles: {
+      'test_hidden.py':
+        'import unittest\nfrom src.app import median_value\nclass Hidden(unittest.TestCase):\n    def test_odd_and_empty(self):\n        self.assertEqual(median_value([9, 1, 5]), 5)\n        with self.assertRaises(ValueError): median_value([])\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenCommands: ['python3 -m unittest test_hidden.py'],
+  },
+  {
+    id: 'py-word-count',
+    language: 'python',
+    title: 'Count normalized words',
+    issue: 'word_counts must normalize case and ignore punctuation around words.',
+    baseState: 'frozen-py-word-count-1',
+    publicCommands: ['python3 -m unittest test_public.py'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/__init__.py': '',
+      'src/app.py':
+        'def word_counts(text):\n    words = text.split()\n    return {word: words.count(word) for word in words}\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import word_counts\nclass Public(unittest.TestCase):\n    def test_normalizes(self): self.assertEqual(word_counts("Hello, hello! world."), {"hello": 2, "world": 1})\nif __name__ == "__main__": unittest.main()\n',
+    },
+    solutionFiles: {
+      'src/__init__.py': '',
+      'src/app.py':
+        'import re\nfrom collections import Counter\n\ndef word_counts(text):\n    return dict(Counter(re.findall(r"[a-z0-9]+(?:\\\'[a-z0-9]+)?", text.lower())))\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import word_counts\nclass Public(unittest.TestCase):\n    def test_normalizes(self): self.assertEqual(word_counts("Hello, hello! world."), {"hello": 2, "world": 1})\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenFiles: {
+      'test_hidden.py':
+        'import unittest\nfrom src.app import word_counts\nclass Hidden(unittest.TestCase):\n    def test_apostrophe_and_empty(self):\n        self.assertEqual(word_counts("Rock’n’roll rock-n-roll"), {"rock": 2, "n": 2, "roll": 2})\n        self.assertEqual(word_counts(""), {})\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenCommands: ['python3 -m unittest test_hidden.py'],
+  },
+  {
+    id: 'py-schedule',
+    language: 'python',
+    title: 'Check working-day availability',
+    issue: 'is_available must reject weekends and compare blocked day names case-insensitively.',
+    baseState: 'frozen-py-schedule-1',
+    publicCommands: ['python3 -m unittest test_public.py'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/__init__.py': '',
+      'src/app.py': 'def is_available(day, blocked):\n    return day not in blocked\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import is_available\nclass Public(unittest.TestCase):\n    def test_weekend(self): self.assertFalse(is_available("Saturday", []))\nif __name__ == "__main__": unittest.main()\n',
+    },
+    solutionFiles: {
+      'src/__init__.py': '',
+      'src/app.py':
+        'def is_available(day, blocked):\n    normalized = day.strip().lower()\n    if normalized in {"saturday", "sunday"}: return False\n    return normalized not in {item.strip().lower() for item in blocked}\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import is_available\nclass Public(unittest.TestCase):\n    def test_weekend(self): self.assertFalse(is_available("Saturday", []))\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenFiles: {
+      'test_hidden.py':
+        'import unittest\nfrom src.app import is_available\nclass Hidden(unittest.TestCase):\n    def test_blocked_case(self):\n        self.assertFalse(is_available(" monday ", ["MONDAY"]))\n        self.assertTrue(is_available("Tuesday", ["monday"]))\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenCommands: ['python3 -m unittest test_hidden.py'],
+  },
+  {
+    id: 'py-merge-settings',
+    language: 'python',
+    title: 'Merge nested settings',
+    issue:
+      'merge_settings must preserve unspecified nested defaults without mutating either input.',
+    baseState: 'frozen-py-merge-settings-1',
+    publicCommands: ['python3 -m unittest test_public.py'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/__init__.py': '',
+      'src/app.py':
+        'def merge_settings(defaults, overrides):\n    result = dict(defaults)\n    result.update(overrides)\n    return result\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import merge_settings\nclass Public(unittest.TestCase):\n    def test_nested(self): self.assertEqual(merge_settings({"retry":{"count":2,"delay":1},"region":"us"}, {"retry":{"count":0}}), {"retry":{"count":0,"delay":1},"region":"us"})\nif __name__ == "__main__": unittest.main()\n',
+    },
+    solutionFiles: {
+      'src/__init__.py': '',
+      'src/app.py':
+        'from copy import deepcopy\n\ndef merge_settings(defaults, overrides):\n    result = deepcopy(defaults)\n    for key, value in overrides.items():\n        if isinstance(value, dict) and isinstance(result.get(key), dict): result[key] = merge_settings(result[key], value)\n        else: result[key] = deepcopy(value)\n    return result\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import merge_settings\nclass Public(unittest.TestCase):\n    def test_nested(self): self.assertEqual(merge_settings({"retry":{"count":2,"delay":1},"region":"us"}, {"retry":{"count":0}}), {"retry":{"count":0,"delay":1},"region":"us"})\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenFiles: {
+      'test_hidden.py':
+        'import unittest\nfrom src.app import merge_settings\nclass Hidden(unittest.TestCase):\n    def test_inputs_unchanged_and_new_value(self):\n        defaults={"nested":{"keep":True}}; overrides={"nested":{"add":1}}; merged=merge_settings(defaults, overrides)\n        self.assertEqual(merged, {"nested":{"keep":True,"add":1}})\n        self.assertEqual(defaults, {"nested":{"keep":True}}); self.assertEqual(overrides, {"nested":{"add":1}})\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenCommands: ['python3 -m unittest test_hidden.py'],
+  },
+  {
+    id: 'py-log-summary',
+    language: 'python',
+    title: 'Summarize log levels',
+    issue:
+      'summarize_log must count recognized levels case-insensitively and ignore malformed lines.',
+    baseState: 'frozen-py-log-summary-1',
+    publicCommands: ['python3 -m unittest test_public.py'],
+    allowedPaths: ['src/**'],
+    baseFiles: {
+      'src/__init__.py': '',
+      'src/app.py':
+        'def summarize_log(lines):\n    counts = {}\n    for line in lines:\n        level = line.split(" ", 1)[0]\n        counts[level] = counts.get(level, 0) + 1\n    return counts\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import summarize_log\nclass Public(unittest.TestCase):\n    def test_levels(self): self.assertEqual(summarize_log(["INFO started", "error failed", "INFO done", "malformed"]), {"info":2,"error":1})\nif __name__ == "__main__": unittest.main()\n',
+    },
+    solutionFiles: {
+      'src/__init__.py': '',
+      'src/app.py':
+        'import re\n\ndef summarize_log(lines):\n    counts = {}\n    for line in lines:\n        match = re.match(r"^(debug|info|warn|error)\\b", line.strip(), re.IGNORECASE)\n        if match:\n            level = match.group(1).lower()\n            counts[level] = counts.get(level, 0) + 1\n    return counts\n',
+      'test_public.py':
+        'import unittest\nfrom src.app import summarize_log\nclass Public(unittest.TestCase):\n    def test_levels(self): self.assertEqual(summarize_log(["INFO started", "error failed", "INFO done", "malformed"]), {"info":2,"error":1})\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenFiles: {
+      'test_hidden.py':
+        'import unittest\nfrom src.app import summarize_log\nclass Hidden(unittest.TestCase):\n    def test_whitespace_and_unknown(self): self.assertEqual(summarize_log([" WARN delayed", "TRACE ignored", "DEBUG detail", "ERROR boom"]), {"warn":1,"debug":1,"error":1})\nif __name__ == "__main__": unittest.main()\n',
+    },
+    hiddenCommands: ['python3 -m unittest test_hidden.py'],
+  },
 ];
 
 export function listBenchmarkTasks(): BenchmarkTaskView[] {
@@ -314,6 +600,7 @@ export function listBenchmarkTasks(): BenchmarkTaskView[] {
     title,
     issue,
     baseState,
+    seed: baseState,
     publicCommands,
     allowedPaths,
   }));
@@ -335,7 +622,16 @@ export function describeBenchmarkTask(id: string): BenchmarkTaskView {
     publicCommands,
     allowedPaths,
   } = getBenchmarkTask(id);
-  return { id: taskId, language, title, issue, baseState, publicCommands, allowedPaths };
+  return {
+    id: taskId,
+    language,
+    title,
+    issue,
+    baseState,
+    seed: baseState,
+    publicCommands,
+    allowedPaths,
+  };
 }
 
 export async function materializeBenchmarkTask(
@@ -361,7 +657,7 @@ export async function materializeBenchmarkTask(
   }
 }
 
-export const BENCHMARK_VERSION = 'frozen-v1';
+export const BENCHMARK_VERSION = 'frozen-v2';
 
 export interface GradeOptions {
   taskId: string;
@@ -481,12 +777,12 @@ export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult
   const baseline = join(root, 'baseline');
   const candidate = join(root, 'candidate');
   const hidden = join(root, 'hidden');
-  await materializeBenchmarkTask(task.id, baseline, 'base');
-  await materializeBenchmarkTask(task.id, candidate, 'base');
-  if (options.attempt) await copyAttempt(options.attempt, candidate);
-  if (options.patch) await applyPatch(options.patch, candidate);
   const checks: CheckOutcome[] = [];
   try {
+    await materializeBenchmarkTask(task.id, baseline, 'base');
+    await materializeBenchmarkTask(task.id, candidate, 'base');
+    if (options.attempt) await copyAttempt(options.attempt, candidate);
+    if (options.patch) await applyPatch(options.patch, candidate);
     for (const command of task.publicCommands)
       checks.push(await runCheck('baseline', command, baseline, timeoutMs));
     const baselineFailed = checks.some(
@@ -511,14 +807,10 @@ export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult
     );
     const candidateChecks = checks.filter((check) => check.phase !== 'baseline');
     const candidatePass = candidateChecks.every((check) => check.status === 'passed');
-    const regressionFree =
-      candidatePass &&
-      checks
-        .filter((check) => check.phase === 'candidate')
-        .every((check) => check.status === 'passed');
-    const baselineKnownFailure = checks
-      .filter((check) => check.phase === 'baseline')
-      .every((check) => check.status === 'failed' || check.status === 'pre_existing_failure');
+    const regressionFree = checks
+      .filter((check) => check.phase === 'candidate')
+      .every((check) => check.status === 'passed');
+    const baselineKnownFailure = baselineFailed;
     const resolvedAt1 = baselineKnownFailure && candidatePass && forbiddenPathsTouched.length === 0;
     const evidence: GradingEvidence = {
       schemaVersion: SCHEMA_VERSION,
@@ -546,7 +838,7 @@ export async function gradeBenchmark(options: GradeOptions): Promise<GradeResult
       timeoutMs,
       attemptPolicy: options.patch ? 'patch' : 'directory',
       provider: options.provider,
-      seed: options.seed,
+      seed: options.seed ?? task.baseState,
       cases: [
         {
           caseId: task.id,
@@ -600,6 +892,7 @@ async function applyPatch(patchPath: string, cwd: string): Promise<void> {
   const patch = await readFile(patchPath, 'utf8');
   if (Buffer.byteLength(patch) > 1_000_000)
     throw new HarnessError('patch exceeds 1MB', 'patch_too_large', 2);
+  if (patch.trim() === '') return;
   const result = await execFileAsync('git', ['init', '-q'], { cwd });
   void result;
   await execFileAsync('git', ['add', '.'], { cwd });
@@ -622,21 +915,20 @@ async function runCheck(
   await mkdir(join(cwd, '.harness-tmp'), { recursive: true, mode: 0o700 });
   const parts = command.split(' ');
   const started = Date.now();
+  const controller = new AbortController();
+  const child = execFileAsync(parts[0] ?? '', parts.slice(1), {
+    cwd,
+    env: {
+      PATH: process.env.PATH,
+      HOME: join(cwd, '.harness-home'),
+      TMPDIR: join(cwd, '.harness-tmp'),
+      HARNESS: '1',
+    },
+    maxBuffer: 200_000,
+    signal: controller.signal,
+  });
   try {
-    const result = await withTimeout(
-      execFileAsync(parts[0] ?? '', parts.slice(1), {
-        cwd,
-        env: {
-          PATH: process.env.PATH,
-          HOME: join(cwd, '.harness-home'),
-          TMPDIR: join(cwd, '.harness-tmp'),
-          HARNESS: '1',
-        },
-        maxBuffer: 200_000,
-      }),
-      timeoutMs,
-      `${phase} check`,
-    );
+    const result = await withTimeout(child, timeoutMs, `${phase} check`);
     return {
       name: `${phase}:${command}`,
       command,
@@ -647,6 +939,10 @@ async function runCheck(
       output: redactSecrets(`${result.stdout}${result.stderr}`),
     };
   } catch (error) {
+    if (error instanceof HarnessError && error.code === 'timeout') {
+      controller.abort();
+      await child.catch(() => undefined);
+    }
     const e = error as { code?: number; stdout?: string; stderr?: string; message?: string };
     return {
       name: `${phase}:${command}`,

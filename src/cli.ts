@@ -265,7 +265,12 @@ async function benchmarkCommand(verb: string | undefined, argv: string[]): Promi
     flagsFor(argv, new Set());
     emit({
       count: listBenchmarkTasks().length,
-      tasks: listBenchmarkTasks().map(({ id, language, title }) => ({ id, language, title })),
+      tasks: listBenchmarkTasks().map(({ id, language, title, seed }) => ({
+        id,
+        language,
+        title,
+        seed,
+      })),
     });
     return 0;
   }
@@ -723,7 +728,7 @@ function help(args: string[]): number {
       'Run a queued task in an isolated workspace. Required: --id <id> --workspace <dir>. Flags: --transport <pi|replay|fake>, --replay <json>, --provider <openai|openai-codex>, --model <id>.',
     'task cancel':
       'Cancel a queued or review task. Required: --id <task-id>. Optional: --reason <text>.',
-    'bench list': 'List the 10 frozen TypeScript/Python tasks. No flags.',
+    'bench list': 'List the 20 frozen TypeScript/Python tasks and stable seeds. No flags.',
     'bench view': 'Inspect solver-facing task metadata. Required: --task <id>. Optional: --full.',
     'bench grade':
       'Grade a candidate without model self-judgment. Required: --task <id> and one of --attempt <dir> or --patch <file>. Optional: --output <file> for a durable JSON report.',

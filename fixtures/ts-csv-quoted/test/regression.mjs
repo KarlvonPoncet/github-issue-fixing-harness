@@ -1,0 +1,1 @@
+import assert from "node:assert/strict"; import test from "node:test"; import { parseCsvLine } from "../src/index.ts"; test("empty unquoted field",()=>assert.deepEqual(parseCsvLine("Ada,,active"), ["Ada","","active"]));
