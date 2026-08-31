@@ -37,8 +37,10 @@ security classifier. A configured policy and human review remain necessary.
 Schema parsers reject unknown fields and enforce type and size limits before
 values enter the worker. Issue title/body/comments, authors, links, repository
 values, prompts, command output, and stored text pass through the project's
-redactor where applicable. Redaction is pattern-based and cannot guarantee
-that every secret format is recognized.
+redactor where applicable. Per-run JSON-lines logs contain only safe metadata
+for tools and models plus redacted error/check text; provider credentials and
+raw tool arguments are not logged. Redaction is pattern-based and cannot
+guarantee that every secret format is recognized.
 
 ### Workspace guardrails
 
@@ -73,12 +75,14 @@ cookies or session tokens.
 
 Credential files are written with mode `0600` and existing non-private files are
 rejected. CLI provider/status output does not print values or local credential
-paths. Artifacts are redacted before string storage, but operators must still
-avoid putting sensitive data in issue bodies, fixtures, prompts, patches, logs,
-or evidence. CI currently runs dependency auditing, project checks, package
-content checks, and the offline demo; it does not run secret scanning. Any
-manual or release secret scan should record only the match type and location,
-not the matched value. See `SECURITY.md` for reporting policy.
+paths. Run logs and artifacts are redacted before string storage and are kept
+under private `0700`/`0600` local paths, but operators must still avoid putting
+sensitive data in issue bodies, fixtures, prompts, patches, logs, or evidence.
+There is no automatic log retention or secure erasure; delete local run data
+when it is no longer needed. CI currently runs dependency auditing, project
+checks, package content checks, and the offline demo; it does not run secret
+scanning. Any manual or release secret scan should record only the match type
+and location, not the matched value. See `SECURITY.md` for reporting policy.
 
 ## What is not protected today
 

@@ -39,10 +39,14 @@ this document intentionally points to them rather than copying every field.
 6. **Tools and evidence.** The model can list files, inspect a file, make an
    exact hash-guarded replacement, run a named command, or signal `finish`.
    Tool calls, results, and one `model_usage` event per attempted model call
-   become typed run events. The worker collects a git diff limited to
-   configured paths and writes issue, patch, event-log, and evidence artifacts,
-   followed by a run manifest. Usage is also recorded in the evidence and
-   manifest; missing provider fields remain null.
+   become typed run events. The worker sends that same event stream to
+   `RunLogger`, which appends synced, redacted JSON-lines records as the run
+   proceeds. It also maintains a redacted manifest snapshot, so state changes,
+   tool/model metadata, warnings/errors, and terminal outcomes survive a
+   partial run. The worker collects a git diff limited to configured paths and
+   writes issue, patch, event-log, and evidence artifacts, followed by a run
+   manifest. Usage is also recorded in the evidence and manifest; missing
+   provider fields remain null.
 7. **Grading and reporting.** `bench grade` independently materializes a fresh
    baseline and candidate, runs baseline/candidate/hidden checks, validates
    changed paths, and emits evidence plus a versioned per-case report. `task
@@ -97,10 +101,16 @@ commands.
 JSON files are written through temporary files and renames. The index and queue
 have in-process write chains, schema checks, delivery-key deduplication, and
 leases. Artifacts are addressed by SHA-256 and each run has a typed record under
-`.harness/runs/`. Finalized run manifests contain the aggregate usage summary;
-event logs preserve usage recorded before an interrupted run. Benchmark reports
-can likewise be persisted as redacted JSON. The default local layout is documented in
-[operations](usage.md#local-data-and-artifacts).
+`.harness/runs/`. `RunLogStore` exclusively creates
+`.harness/logs/<run-id>.jsonl` and appends one synced event at a time; the
+matching `<run-id>.manifest.json` is atomically replaced as lifecycle milestones
+complete. Distinct run IDs therefore cannot overwrite one another, including
+when runs execute concurrently. Finalized run manifests contain the aggregate
+usage summary; event logs preserve usage and errors recorded before an
+interrupted run. Benchmark reports can likewise be persisted as redacted JSON.
+There is no automatic retention or cleanup: operators may remove a complete
+run's log, manifest, and artifacts when they no longer need them. The default
+local layout is documented in [operations](usage.md#local-data-and-artifacts).
 
 Recovery is intentionally modest. `DurableQueue.recoverExpired()` requeues
 expired `claimed`/`running` entries, and `LocalIndex.recoverInterrupted()`
@@ -110,10 +120,11 @@ reduces partial-write risk, but queue, index, artifact, and workspace updates
 are not one transaction. A crash can therefore require inspection and an
 operator-directed retry.
 
-This design is for one local worker. It has no hosted coordination, database
-transaction, inter-process lock, multi-worker fairness guarantee, or distributed
-lease authority. Do not run multiple writers against the same `.harness`
-directory and infer serialized behavior.
+This design is for one local queue/index worker. It has no hosted coordination,
+database transaction, multi-worker fairness guarantee, or distributed lease
+authority. Run logs are isolated and append-safe across concurrent run IDs, but
+queue/index updates still have no cross-process lock; do not run multiple queue
+writers against the same `.harness` directory and infer serialized behavior.
 
 ## Base provenance and delivery
 

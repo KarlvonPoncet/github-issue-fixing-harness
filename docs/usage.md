@@ -89,7 +89,8 @@ is not used to enforce checkout; exact-base provenance is a roadmap item.
 Run-specific settings are flags:
 
 - `task run` requires a task ID and caller-provided `--workspace` and accepts
-  `--transport pi|replay|fake`, `--replay`, `--provider`, and `--model`.
+  `--transport pi|replay|fake`, `--replay`, `--provider`, and `--model`. Its
+  TOON result includes `logPath`, the absolute path of the per-run diagnostics.
 - `bench grade`, `bench run`, and `bench replay` require `--task` plus either
   `--attempt` directory or `--patch` file.
 - `bench summary` accepts `--solutions` or `--attempt-root`.
@@ -178,18 +179,39 @@ The default worker root is `.harness/` (ignored by Git):
 
 - `queue.json` contains queue entries, attempts, leases, and delivery keys;
 - `store/index.json` contains normalized tasks, run manifests, and checkpoints;
-- `artifacts/<prefix>/<sha256>` contains content-addressed data; and
-- `runs/<run-id>.*.json` contains typed artifact records.
+- `artifacts/<prefix>/<sha256>` contains content-addressed data;
+- `runs/<run-id>.*.json` contains typed artifact records; and
+- `logs/<run-id>.jsonl` plus `logs/<run-id>.manifest.json` contain the durable
+  per-run event stream and manifest snapshot.
 
 Runs may include normalized issue, patch, event log, evidence, manifest,
 provider/model profile, budget, elapsed time, usage, failure category, and
-residual risks. Model usage counts attempted calls, including retries and
-provider failures; provider-reported input, output, cache, reasoning, and
-total fields are preserved when available. Aggregate fields are null when
-missing or partial rather than silently becoming zero. Values pass through
-redaction, but redaction is not a reason to store private data. Credentials,
-cookies, tokens, and private repository data do not belong in fixtures,
-prompts, patches, or artifacts.
+residual risks. In addition, each `task run` writes:
+
+- `.harness/logs/<run-id>.jsonl`, one redacted `RunEvent` JSON object per line;
+- `.harness/logs/<run-id>.manifest.json`, an atomically updated redacted run
+  manifest snapshot.
+
+The JSON-lines file starts with `run_started` and records state entry/exit,
+allowlisted tool names and IDs (not arguments or content), model usage counts
+and token metadata, checks, warnings, errors, and the terminal outcome. Writes
+are synced as events arrive, so a process interruption leaves the prefix that
+was already recorded. A unique run ID and exclusive file creation prevent
+repeated or concurrent runs from overwriting another run. There is no automatic
+retention or cleanup; remove the matching log, manifest, and artifact records
+manually when appropriate. If the log directory cannot be created or written,
+the run reports a storage error rather than silently claiming durable logging.
+
+Model usage counts attempted calls, including retries and provider failures;
+provider-reported input, output, cache, reasoning, and total fields are
+preserved when available. Aggregate fields are null when missing or partial
+rather than silently becoming zero. Values pass through the project's
+pattern-based redaction, including common API keys, tokens, bearer values,
+JWTs, and private keys, but redaction is not comprehensive and is not a reason
+to store private data. Credentials, cookies, tokens, and private repository data
+do not belong in fixtures, prompts, patches, logs, or artifacts. Logs and
+manifests are created private (directory `0700`, files `0600`); protect the
+`.harness` directory and delete it if its contents are no longer needed.
 
 Atomic JSON writes and local leases support simple restart/requeue workflows,
 but they do not provide crash-safe transactions across all files. Recovery

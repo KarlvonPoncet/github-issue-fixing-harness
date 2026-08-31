@@ -1,13 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, open, readFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import {
   SCHEMA_VERSION,
   parseArtifactRecord,
   parseNormalizedTask,
+  parseRunEvent,
   parseRunManifest,
 } from './schema.js';
-import type { ArtifactRecord, NormalizedIssueTask, QueueState, RunManifest } from './schema.js';
+import type {
+  AgentState,
+  ArtifactRecord,
+  NormalizedIssueTask,
+  QueueState,
+  RunEvent,
+  RunManifest,
+} from './schema.js';
 import { atomicWrite, nowIso, readJson, redactSecrets, sha256 } from './util.js';
 
 interface IndexFile {
@@ -154,18 +162,140 @@ export class LocalIndex {
   }
 }
 
+const safeRunId = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+
+/**
+ * Durable JSON-lines sink for the same typed RunEvent stream returned by the
+ * worker. A file is created exclusively for each run, then appended and synced
+ * one event at a time so partial runs remain inspectable.
+ */
+export class RunLogger {
+  readonly path: string;
+  readonly manifestPath: string;
+  private writeChain: Promise<void> = Promise.resolve();
+  private sequence = 0;
+
+  constructor(
+    readonly runId: string,
+    directory: string,
+  ) {
+    if (!safeRunId.test(runId)) throw new Error('run ID is not safe for local log storage');
+    this.path = join(directory, `${runId}.jsonl`);
+    this.manifestPath = join(directory, `${runId}.manifest.json`);
+  }
+
+  async create(): Promise<void> {
+    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    try {
+      const handle = await open(this.path, 'wx', 0o600);
+      await handle.close();
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'EEXIST')
+        throw new Error(`run log already exists: ${this.path}`);
+      throw error;
+    }
+  }
+
+  async start(manifest: RunManifest): Promise<void> {
+    await this.updateManifest(manifest);
+  }
+
+  async append(event: RunEvent): Promise<void> {
+    if (event.runId !== this.runId) throw new Error('run event correlation ID does not match log');
+    if (event.sequence !== this.sequence)
+      throw new Error(`run event sequence is out of order for ${this.runId}`);
+    const safeEvent = parseRunEvent(
+      JSON.parse(
+        redactSecrets(
+          JSON.stringify({
+            ...event,
+            data: Object.fromEntries(
+              Object.entries(event.data).map(([key, value]) => [
+                key,
+                typeof value === 'string' ? redactSecrets(value) : value,
+              ]),
+            ),
+          }),
+        ),
+      ) as unknown,
+    );
+    const line = `${JSON.stringify(safeEvent)}\n`;
+    this.sequence = safeEvent.sequence + 1;
+    this.writeChain = this.writeChain.then(async () => {
+      const handle = await open(this.path, 'a', 0o600);
+      try {
+        await handle.write(line, undefined, 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    });
+    await this.writeChain;
+  }
+
+  async updateManifest(manifest: RunManifest): Promise<void> {
+    if (manifest.runId !== this.runId)
+      throw new Error('run manifest correlation ID does not match log');
+    const safeManifest = parseRunManifest(
+      JSON.parse(redactSecrets(JSON.stringify(manifest))) as unknown,
+    );
+    await atomicWrite(this.manifestPath, `${JSON.stringify(safeManifest, null, 2)}\n`);
+  }
+
+  async error(state: AgentState, message: string, code?: string): Promise<void> {
+    await this.append({
+      schemaVersion: SCHEMA_VERSION,
+      runId: this.runId,
+      sequence: this.sequence,
+      at: nowIso(),
+      type: 'error',
+      state,
+      data: { message: redactSecrets(message), code: code ?? null },
+    });
+  }
+}
+
+export class RunLogStore {
+  readonly root: string;
+  readonly directory: string;
+
+  constructor(root = '.harness') {
+    this.root = resolve(root);
+    this.directory = join(this.root, 'logs');
+  }
+
+  async init(): Promise<void> {
+    await mkdir(this.directory, { recursive: true, mode: 0o700 });
+  }
+
+  pathFor(runId: string): string {
+    if (!safeRunId.test(runId)) throw new Error('run ID is not safe for local log storage');
+    return join(this.directory, `${runId}.jsonl`);
+  }
+
+  async create(runId: string): Promise<RunLogger> {
+    await this.init();
+    const logger = new RunLogger(runId, this.directory);
+    await logger.create();
+    return logger;
+  }
+}
+
 export class ArtifactStore {
   readonly root: string;
   readonly index: LocalIndex;
+  readonly logs: RunLogStore;
 
   constructor(root = '.harness') {
     this.root = root;
     this.index = new LocalIndex(join(root, 'store'));
+    this.logs = new RunLogStore(root);
   }
 
   async init(): Promise<void> {
     await mkdir(join(this.root, 'artifacts'), { recursive: true, mode: 0o700 });
     await mkdir(join(this.root, 'runs'), { recursive: true, mode: 0o700 });
+    await this.logs.init();
     await this.index.load();
   }
 

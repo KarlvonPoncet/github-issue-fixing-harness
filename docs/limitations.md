@@ -15,10 +15,11 @@ These are implemented limitations, not merely future features:
 - Workspace path, hash, command, timeout, output, and environment controls are
   application guardrails only. The reduced environment is not an OS/network
   sandbox for untrusted repository code.
-- Queue/index/artifact updates are separate local JSON/filesystem operations.
-  Leases and recovery helpers exist, but there is no crash-safe multi-file
-  transaction, automatic recovery daemon, distributed lock, or multi-worker
-  coordination.
+- Queue/index/artifact/log updates are separate local JSON/filesystem
+  operations. Per-run logs are append-safe and isolated by run ID, but there is
+  no crash-safe multi-file transaction, automatic log retention or recovery
+  daemon, distributed lock, or multi-worker queue coordination. A crash can
+  leave a durable partial log alongside incomplete artifacts.
 - No branch, commit, push, draft PR, review request, merge, or other GitHub
   delivery/mutation is implemented.
 - The ten fixtures and their hidden checks are a deterministic grader sanity

@@ -44,8 +44,10 @@ command and development reference is in [Development and CLI usage](docs/usage.m
 
 The CLI is non-interactive except for the explicit Codex OAuth login flow.
 Machine-readable results are TOON on stdout; diagnostics are on stderr. Unknown
-commands and flags fail with exit code 2. Run `node dist/cli.js --help` or a
-command-specific `--help` for the authoritative, version-matched synopsis.
+commands and flags fail with exit code 2. A `task run` result includes the
+absolute `logPath` for its durable local JSON-lines diagnostics. Run
+`node dist/cli.js --help` or a command-specific `--help` for the authoritative,
+version-matched synopsis.
 
 ## How the system fits together
 
@@ -59,6 +61,7 @@ GitHub webhook (HMAC) or reconciliation poll
   -> caller-provided workspace plus provider-independent model transport
   -> inspect -> reproduce -> plan -> edit -> test -> self-review -> terminal
   -> redacted patch/events/evidence/manifests in content-addressed artifacts
+  -> one durable per-run JSON-lines event log plus manifest snapshot
   -> optional independent benchmark grading and terminal CLI report
 ```
 

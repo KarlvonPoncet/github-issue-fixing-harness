@@ -87,6 +87,7 @@ export interface RunEvent {
   sequence: number;
   at: string;
   type:
+    | 'run_started'
     | 'state_entered'
     | 'state_exited'
     | 'tool_call'
@@ -94,6 +95,7 @@ export interface RunEvent {
     | 'check'
     | 'model_usage'
     | 'warning'
+    | 'error'
     | 'terminal';
   state: AgentState;
   data: Record<string, string | number | boolean | null>;
@@ -482,6 +484,7 @@ export function parseRunEvent(input: unknown): RunEvent {
         enumValue(
           v,
           [
+            'run_started',
             'state_entered',
             'state_exited',
             'tool_call',
@@ -489,6 +492,7 @@ export function parseRunEvent(input: unknown): RunEvent {
             'check',
             'model_usage',
             'warning',
+            'error',
             'terminal',
           ] as const,
           p,
